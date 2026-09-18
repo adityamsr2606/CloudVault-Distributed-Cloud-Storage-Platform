@@ -3162,3 +3162,62 @@ button.file-glyph {
     grid-template-columns: 1fr;
   }
 }
+
+
+.folder-chip-shell {
+  position: relative;
+  min-width: 150px;
+}
+
+.folder-chip-shell .folder-chip {
+  width: 100%;
+  padding-right: 42px;
+}
+
+.folder-trash-button {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease,
+    background 150ms ease;
+}
+
+.folder-chip-shell:hover .folder-trash-button,
+.folder-trash-button:focus-visible {
+  opacity: 1;
+}
+
+.folder-trash-button:hover {
+  border-color: color-mix(in srgb, var(--danger) 20%, transparent);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  color: var(--danger);
+}
+
+.folder-trash-button:disabled {
+  cursor: not-allowed;
+  opacity: .35;
+}
+
+.trash-section + .trash-section {
+  margin-top: 14px;
+}
+
+@media (hover: none) {
+  .folder-trash-button {
+    opacity: 1;
+  }
+}
