@@ -4,6 +4,7 @@ import {
   FolderPlus,
   Grid2X2,
   List,
+  Trash2,
   Upload,
 } from "lucide-react";
 import {
@@ -30,6 +31,7 @@ import {
   createFolder,
   listFiles,
   listFolders,
+  trashFolder,
 } from "../lib/cloudvault";
 import {
   CloudUploadTask,
@@ -136,6 +138,32 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
     }
   }
 
+  async function moveCurrentFolderToTrash() {
+    if (!activeFolderRecord) return;
+
+    const confirmed = window.confirm(
+      'Move "' +
+        activeFolderRecord.name +
+        '" and its active files/subfolders to Trash? You can restore the folder later.',
+    );
+    if (!confirmed) return;
+
+    try {
+      const result = await trashFolder(activeFolderRecord.id);
+      setActiveFolder(null);
+      await refresh();
+      setMessage(
+        'Folder moved to Trash with ' +
+          result.filesTrashed +
+          ' file' +
+          (result.filesTrashed === 1 ? '' : 's') +
+          '.',
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not move folder to Trash");
+    }
+  }
+
   const uploadBusy =
     uploadProgress != null &&
     ["preparing", "uploading", "paused", "completing"].includes(uploadProgress.state);
@@ -155,6 +183,15 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
         </div>
 
         <div className="header-actions">
+          {!starredOnly && activeFolderRecord && (
+            <button
+              className="danger-button compact"
+              onClick={() => void moveCurrentFolderToTrash()}
+              disabled={uploadBusy}
+            >
+              <Trash2 size={15} /> Move folder to Trash
+            </button>
+          )}
           {!starredOnly && settings?.folders_enabled !== false && (
             <button className="ghost-button" onClick={newFolder}>
               <FolderPlus size={16} /> New folder
