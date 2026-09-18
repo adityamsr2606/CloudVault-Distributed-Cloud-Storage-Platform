@@ -45,24 +45,50 @@ function encodeCopySource(bucket: string, key: string) {
   );
 }
 
-function r2Client() {
-  const accountId = Deno.env.get("R2_ACCOUNT_ID");
-  const accessKeyId = Deno.env.get("R2_ACCESS_KEY_ID");
-  const secretAccessKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
-  const bucket = Deno.env.get("R2_BUCKET");
+function objectStore(provider: string) {
+  if (provider === "b2") {
+    const endpoint = Deno.env.get("B2_S3_ENDPOINT");
+    const region = Deno.env.get("B2_REGION");
+    const accessKeyId = Deno.env.get("B2_APPLICATION_KEY_ID");
+    const secretAccessKey = Deno.env.get("B2_APPLICATION_KEY");
+    const bucket = Deno.env.get("B2_BUCKET");
 
-  if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
-    throw new Error("R2 is not configured on this deployment.");
+    if (!endpoint || !region || !accessKeyId || !secretAccessKey || !bucket) {
+      throw new Error("Backblaze B2 is not configured on this deployment.");
+    }
+
+    return {
+      bucket,
+      client: new S3Client({
+        region,
+        endpoint,
+        forcePathStyle: true,
+        credentials: { accessKeyId, secretAccessKey },
+      }),
+    };
   }
 
-  return {
-    bucket,
-    client: new S3Client({
-      region: "auto",
-      endpoint: "https://" + accountId + ".r2.cloudflarestorage.com",
-      credentials: { accessKeyId, secretAccessKey },
-    }),
-  };
+  if (provider === "r2") {
+    const accountId = Deno.env.get("R2_ACCOUNT_ID");
+    const accessKeyId = Deno.env.get("R2_ACCESS_KEY_ID");
+    const secretAccessKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
+    const bucket = Deno.env.get("R2_BUCKET");
+
+    if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
+      throw new Error("Cloudflare R2 is not configured on this deployment.");
+    }
+
+    return {
+      bucket,
+      client: new S3Client({
+        region: "auto",
+        endpoint: "https://" + accountId + ".r2.cloudflarestorage.com",
+        credentials: { accessKeyId, secretAccessKey },
+      }),
+    };
+  }
+
+  throw new Error("Unsupported large-object provider.");
 }
 
 Deno.serve(async (req: Request) => {
@@ -122,8 +148,8 @@ Deno.serve(async (req: Request) => {
       "/" +
       safeName(current.name);
 
-    if (version.storage_provider === "r2") {
-      const { client, bucket } = r2Client();
+    if (version.storage_provider !== "supabase") {
+      const { client, bucket } = objectStore(String(version.storage_provider));
       await client.send(
         new CopyObjectCommand({
           Bucket: bucket,
@@ -178,8 +204,8 @@ Deno.serve(async (req: Request) => {
     if (shouldIndex) {
       let text = "";
 
-      if (version.storage_provider === "r2") {
-        const { client, bucket } = r2Client();
+      if (version.storage_provider !== "supabase") {
+        const { client, bucket } = objectStore(String(version.storage_provider));
         const object = await client.send(
           new GetObjectCommand({ Bucket: bucket, Key: nextPath }),
         );

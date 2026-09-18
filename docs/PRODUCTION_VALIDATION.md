@@ -38,7 +38,7 @@ Verified:
 - public share resolution uses controlled signed URLs
 - folder trash/restore RPCs are authenticated and security-invoker
 - `index-chunks` is a 410 Gone compatibility stub; `index-file` is the supported indexer
-- R2 credentials are not exposed to the browser
+- B2 credentials are not exposed to the browser
 - external generative AI remains opt-in and disabled by default
 
 Current security advisor result:
@@ -102,18 +102,18 @@ Active hosted-provider state:
 
 - Supabase direct upload ceiling: 50 MB
 - large-upload provider: R2
-- `r2_enabled=false`
+- `b2_enabled=false`
 
 The multipart engine, provider-aware file lifecycle and R2 Edge Functions are implemented,
-but no real R2 account credentials/bucket are connected in this environment. Therefore a
+but no real B2 account credentials/bucket are connected in this environment. Therefore a
 real >=1.5 GiB transfer has **not** been claimed as production-verified.
 
-Activation requires the exact checklist in `docs/R2_SETUP.md`:
+Activation requires the exact checklist in `docs/B2_SETUP.md`:
 
-1. private R2 bucket
-2. scoped R2 credentials stored only as Edge Function secrets
+1. private B2 bucket
+2. scoped B2 credentials stored only as Edge Function secrets
 3. production CORS that exposes `ETag`
-4. enable `r2_enabled`
+4. enable `b2_enabled`
 5. test upload, pause, resume, refresh recovery, versioning, sharing, download and purge
 6. complete an actual >=1.5 GiB upload
 
@@ -174,7 +174,7 @@ CloudVault v2 is code-complete for its current free-first architecture.
 
 The following are external activation/measurement gates, not hidden completed features:
 
-- real R2 large-object account configuration and >=1.5 GiB E2E test
+- real B2 large-object account configuration and >=1.5 GiB E2E test
 - Supabase hosted passkey/WebAuthn activation
 - Supabase production Auth URL allowlist verification
 - meaningful retrieval-quality benchmark after real files are indexed

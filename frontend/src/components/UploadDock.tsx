@@ -28,7 +28,11 @@ export default function UploadDock({
         <div>
           <strong>{fileName}</strong>
           <span>
-            {progress.provider === "r2" ? "Resumable multipart · R2" : "Direct upload · Supabase"}
+            {progress.provider === "b2"
+              ? "Resumable multipart · Backblaze B2"
+              : progress.provider !== "supabase"
+                ? "Resumable multipart · R2"
+                : "Direct upload · Supabase"}
           </span>
         </div>
 
@@ -67,7 +71,7 @@ export default function UploadDock({
         </span>
         <span>
           {formatBytes(progress.loadedBytes)} / {formatBytes(progress.totalBytes)}
-          {progress.provider === "r2" && progress.totalParts > 1
+          {progress.provider !== "supabase" && progress.totalParts > 1
             ? " · " + progress.uploadedParts + "/" + progress.totalParts + " parts"
             : ""}
         </span>

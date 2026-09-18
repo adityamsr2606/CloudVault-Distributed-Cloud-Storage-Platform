@@ -210,16 +210,19 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
 
       {message && <div className="inline-message">{message}</div>}
 
-      {!starredOnly && settings && !settings.r2_enabled && (
-        <div className="provider-notice">
-          <span>
-            <strong>1.5 GiB policy is configured.</strong>
-            Large-file R2 credentials are not connected yet, so the active hosted provider
-            currently accepts direct files up to{" "}
-            {formatCapacity(settings.supabase_direct_upload_max_bytes)}.
-          </span>
-        </div>
-      )}
+      {!starredOnly &&
+        settings &&
+        settings.large_upload_provider === "b2" &&
+        !settings.b2_enabled && (
+          <div className="provider-notice">
+            <span>
+              <strong>1.5 GiB policy is configured.</strong>
+              Backblaze B2 is the large-file target, but its server-side credentials are
+              not connected yet. Direct Supabase uploads currently work up to{" "}
+              {formatCapacity(settings.supabase_direct_upload_max_bytes)}.
+            </span>
+          </div>
+        )}
 
       {!starredOnly && settings?.folders_enabled !== false && (
         <div className="vault-breadcrumb">
@@ -295,7 +298,11 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
                 <strong>{file.name}</strong>
                 <span>
                   {bytes(file.size_bytes)} · v{file.current_version}
-                  {file.storage_provider === "r2" ? " · R2" : ""}
+                  {file.storage_provider === "b2"
+                    ? " · B2"
+                    : file.storage_provider === "r2"
+                      ? " · R2"
+                      : ""}
                 </span>
               </button>
               <span className={"status-pill " + file.status}>{file.status}</span>

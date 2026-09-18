@@ -2,9 +2,9 @@
 
 alter table public.product_settings
   add column if not exists storage_provider text not null default 'supabase'
-    check (storage_provider in ('supabase','r2')),
+    check (storage_provider in ('supabase','r2','b2')),
   add column if not exists large_upload_provider text not null default 'r2'
-    check (large_upload_provider in ('supabase','r2')),
+    check (large_upload_provider in ('supabase','r2','b2')),
   add column if not exists supabase_direct_upload_max_bytes bigint not null default 52428800
     check (supabase_direct_upload_max_bytes > 0),
   add column if not exists large_upload_threshold_bytes bigint not null default 52428800
@@ -14,6 +14,7 @@ alter table public.product_settings
   add column if not exists multipart_parallelism integer not null default 3
     check (multipart_parallelism between 1 and 8),
   add column if not exists r2_enabled boolean not null default false,
+  add column if not exists b2_enabled boolean not null default false,
   add column if not exists passkeys_enabled boolean not null default false,
   add column if not exists mfa_enabled boolean not null default true,
   add column if not exists mfa_required boolean not null default false,
@@ -33,23 +34,25 @@ update public.product_settings
 set max_upload_bytes = 1610612736,
     supabase_direct_upload_max_bytes = 52428800,
     large_upload_threshold_bytes = 52428800,
+    large_upload_provider = 'b2',
+    b2_enabled = false,
     updated_at = now()
 where id = 'default';
 
 alter table public.vault_files
   add column if not exists storage_provider text not null default 'supabase'
-    check (storage_provider in ('supabase','r2'));
+    check (storage_provider in ('supabase','r2','b2'));
 
 alter table public.file_versions
   add column if not exists storage_provider text not null default 'supabase'
-    check (storage_provider in ('supabase','r2'));
+    check (storage_provider in ('supabase','r2','b2'));
 
 create table if not exists public.multipart_uploads (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references auth.users(id) on delete cascade,
   file_id uuid not null,
   folder_id uuid null references public.vault_folders(id) on delete set null,
-  provider text not null check (provider in ('r2')),
+  provider text not null check (provider in ('r2','b2')),
   provider_upload_id text not null,
   object_key text not null,
   file_name text not null,

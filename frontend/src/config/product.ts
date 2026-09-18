@@ -21,13 +21,14 @@ export type ProductSettings = {
   chunk_size_chars: number;
   chunk_overlap_chars: number;
   share_signed_url_seconds: number;
-  storage_provider: "supabase" | "r2";
-  large_upload_provider: "supabase" | "r2";
+  storage_provider: "supabase" | "r2" | "b2";
+  large_upload_provider: "supabase" | "r2" | "b2";
   supabase_direct_upload_max_bytes: number;
   large_upload_threshold_bytes: number;
   multipart_part_size_bytes: number;
   multipart_parallelism: number;
   r2_enabled: boolean;
+  b2_enabled: boolean;
   passkeys_enabled: boolean;
   mfa_enabled: boolean;
   mfa_required: boolean;
@@ -63,12 +64,13 @@ const fallbackSettings: ProductSettings = {
   chunk_overlap_chars: 220,
   share_signed_url_seconds: 600,
   storage_provider: "supabase",
-  large_upload_provider: "r2",
+  large_upload_provider: "b2",
   supabase_direct_upload_max_bytes: 52_428_800,
   large_upload_threshold_bytes: 52_428_800,
   multipart_part_size_bytes: 16_777_216,
   multipart_parallelism: 3,
   r2_enabled: false,
+  b2_enabled: false,
   passkeys_enabled: false,
   mfa_enabled: true,
   mfa_required: false,

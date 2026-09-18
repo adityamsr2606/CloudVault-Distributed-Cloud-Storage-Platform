@@ -26,24 +26,50 @@ function safeName(value: string) {
   return value.replaceAll("/", "_").replaceAll("\\", "_").slice(0, 180) || "file";
 }
 
-function r2Client() {
-  const accountId = Deno.env.get("R2_ACCOUNT_ID");
-  const accessKeyId = Deno.env.get("R2_ACCESS_KEY_ID");
-  const secretAccessKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
-  const bucket = Deno.env.get("R2_BUCKET");
+function objectStore(provider: string) {
+  if (provider === "b2") {
+    const endpoint = Deno.env.get("B2_S3_ENDPOINT");
+    const region = Deno.env.get("B2_REGION");
+    const accessKeyId = Deno.env.get("B2_APPLICATION_KEY_ID");
+    const secretAccessKey = Deno.env.get("B2_APPLICATION_KEY");
+    const bucket = Deno.env.get("B2_BUCKET");
 
-  if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
-    throw new Error("R2 is not configured on this deployment.");
+    if (!endpoint || !region || !accessKeyId || !secretAccessKey || !bucket) {
+      throw new Error("Backblaze B2 is not configured on this deployment.");
+    }
+
+    return {
+      bucket,
+      client: new S3Client({
+        region,
+        endpoint,
+        forcePathStyle: true,
+        credentials: { accessKeyId, secretAccessKey },
+      }),
+    };
   }
 
-  return {
-    bucket,
-    client: new S3Client({
-      region: "auto",
-      endpoint: "https://" + accountId + ".r2.cloudflarestorage.com",
-      credentials: { accessKeyId, secretAccessKey },
-    }),
-  };
+  if (provider === "r2") {
+    const accountId = Deno.env.get("R2_ACCOUNT_ID");
+    const accessKeyId = Deno.env.get("R2_ACCESS_KEY_ID");
+    const secretAccessKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
+    const bucket = Deno.env.get("R2_BUCKET");
+
+    if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
+      throw new Error("Cloudflare R2 is not configured on this deployment.");
+    }
+
+    return {
+      bucket,
+      client: new S3Client({
+        region: "auto",
+        endpoint: "https://" + accountId + ".r2.cloudflarestorage.com",
+        credentials: { accessKeyId, secretAccessKey },
+      }),
+    };
+  }
+
+  throw new Error("Unsupported large-object provider.");
 }
 
 function textLike(name: string, mimeType: string) {
@@ -83,13 +109,21 @@ Deno.serve(async (req: Request) => {
       .single();
 
     if (settingsError || !settings) throw settingsError ?? new Error("Missing product settings");
-    if (!settings.r2_enabled) {
-      return json({ error: "R2 large-file uploads are not enabled yet." }, 503);
+    const provider = String(settings.large_upload_provider ?? "b2");
+    const providerEnabled =
+      provider === "b2"
+        ? Boolean(settings.b2_enabled)
+        : provider === "r2"
+          ? Boolean(settings.r2_enabled)
+          : false;
+
+    if (!providerEnabled) {
+      return json({ error: "The configured large-file provider is not enabled yet." }, 503);
     }
 
     const body = await req.json();
     const action = String(body.action ?? "");
-    const { client, bucket } = r2Client();
+    const { client, bucket } = objectStore(provider);
 
     if (action === "initiate") {
       const fileName = safeName(String(body.file_name ?? ""));
@@ -148,7 +182,7 @@ Deno.serve(async (req: Request) => {
         }),
       );
 
-      if (!initiated.UploadId) throw new Error("R2 did not return an upload id.");
+      if (!initiated.UploadId) throw new Error("The object store did not return an upload id.");
 
       const { data: session, error: sessionError } = await supabase
         .from("multipart_uploads")
@@ -156,7 +190,7 @@ Deno.serve(async (req: Request) => {
           owner_id: authData.user.id,
           file_id: fileId,
           folder_id: effectiveFolderId,
-          provider: "r2",
+          provider,
           provider_upload_id: initiated.UploadId,
           object_key: objectKey,
           file_name: fileName,
@@ -339,7 +373,7 @@ Deno.serve(async (req: Request) => {
             owner_id: authData.user.id,
             version_number: session.version_number,
             storage_path: session.object_key,
-            storage_provider: "r2",
+            storage_provider: provider,
             mime_type: session.mime_type,
             size_bytes: session.size_bytes,
             sha256: null,
@@ -352,7 +386,7 @@ Deno.serve(async (req: Request) => {
           .update({
             name: session.file_name,
             storage_path: session.object_key,
-            storage_provider: "r2",
+            storage_provider: provider,
             mime_type: session.mime_type,
             size_bytes: session.size_bytes,
             sha256: null,
@@ -375,7 +409,7 @@ Deno.serve(async (req: Request) => {
             folder_id: session.folder_id,
             name: session.file_name,
             storage_path: session.object_key,
-            storage_provider: "r2",
+            storage_provider: provider,
             mime_type: session.mime_type,
             size_bytes: session.size_bytes,
             sha256: null,
@@ -394,7 +428,7 @@ Deno.serve(async (req: Request) => {
             owner_id: authData.user.id,
             version_number: 1,
             storage_path: session.object_key,
-            storage_provider: "r2",
+            storage_provider: provider,
             mime_type: session.mime_type,
             size_bytes: session.size_bytes,
             sha256: null,
