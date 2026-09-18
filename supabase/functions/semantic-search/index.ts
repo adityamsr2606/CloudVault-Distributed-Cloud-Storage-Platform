@@ -2,10 +2,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "@supabase/supabase-js";
 
-type SearchRequest = {
-  query: string;
-  limit?: number;
-};
+type SearchRequest = { query: string; limit?: number };
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,9 +10,7 @@ const corsHeaders = {
 };
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
     const authHeader = req.headers.get("Authorization");
@@ -40,7 +35,19 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const body = (await req.json()) as SearchRequest;
+    const [{ data: settings, error: settingsError }, body] = await Promise.all([
+      supabase.from("product_settings").select("ai_enabled,semantic_search_limit").eq("id", "default").single(),
+      req.json() as Promise<SearchRequest>,
+    ]);
+
+    if (settingsError || !settings) throw settingsError ?? new Error("Missing product settings");
+    if (!settings.ai_enabled) {
+      return new Response(JSON.stringify({ error: "AI search is disabled" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const query = body.query?.trim();
     if (!query || query.length < 2) {
       return new Response(JSON.stringify({ error: "Query is too short" }), {
@@ -55,11 +62,16 @@ Deno.serve(async (req: Request) => {
       normalize: true,
     });
 
+    const requested = Number(body.limit ?? settings.semantic_search_limit);
+    const limit = Math.min(
+      Math.max(Number.isFinite(requested) ? requested : settings.semantic_search_limit, 1),
+      settings.semantic_search_limit,
+    );
+
     const { data, error } = await supabase.rpc("match_vault_chunks", {
       query_embedding: embedding,
-      match_count: Math.min(Math.max(body.limit ?? 12, 1), 30),
+      match_count: limit,
     });
-
     if (error) throw error;
 
     const bestByFile = new Map<string, unknown>();
