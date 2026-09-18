@@ -179,3 +179,36 @@ The following are external activation/measurement gates, not hidden completed fe
 - Supabase production Auth URL allowlist verification
 - meaningful retrieval-quality benchmark after real files are indexed
 - meaningful end-to-end load test after representative production data exists
+
+
+## Frontend route-splitting evidence
+
+Measured from GitHub Actions production builds:
+
+Before route-level lazy loading:
+
+- single JavaScript bundle: **530.29 kB**
+- gzip: **150.22 kB**
+
+After route-level lazy loading:
+
+- shared base chunks: **445.34 kB** combined
+- shared gzip: **130.04 kB** combined
+- page modules are emitted separately and loaded on demand
+
+Representative deferred page chunks include:
+
+- Vault: ~6.38 kB gzip
+- Settings: ~3.52 kB gzip
+- Intelligence: ~2.10 kB gzip
+- Dashboard: ~1.69 kB gzip
+- Auth: ~1.96 kB gzip
+
+This is approximately a **16% reduction in shared minified JavaScript** and a
+**13% reduction in shared gzip JavaScript** before route-specific code is loaded.
+
+Responsive browser QA for the route-split build passed **28/28 tests** across Chromium
+and WebKit using representative 320, 360, 390, 430, 768, 820 and 1024 px viewport classes.
+
+These are build-artifact measurements and browser smoke-test results, not network or
+real-user performance measurements.
