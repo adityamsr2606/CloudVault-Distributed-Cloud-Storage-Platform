@@ -102,7 +102,7 @@ services:
   worker:
     build:
       context: ./backend
-    command: celery -A app.workers.celery_app.celery_app worker --loglevel=INFO --concurrency=2
+      dockerfile: Dockerfile.worker
     environment: *backend-env
     depends_on:
       migrate:

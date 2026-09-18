@@ -32,6 +32,9 @@ jobs:
       - name: Tests
         run: pytest --cov=app --cov-report=term-missing
 
+      - name: Compile application
+        run: python -m compileall -q app
+
       - name: Build backend image
         run: docker build -t cloudvault-api .
 
