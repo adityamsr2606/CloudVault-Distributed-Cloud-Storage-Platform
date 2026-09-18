@@ -403,6 +403,7 @@ GitHub Actions validates:
 - backend Docker image
 - npm high-severity audit
 - TypeScript/Vite production build
+- Playwright responsive browser QA in Chromium and WebKit
 - tested frontend build artifact
 - frontend Docker image
 - Deno typechecking for production Edge Functions
