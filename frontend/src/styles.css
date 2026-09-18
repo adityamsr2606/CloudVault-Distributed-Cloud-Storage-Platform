@@ -2603,3 +2603,27 @@ button.file-glyph {
     flex-wrap: wrap;
   }
 }
+
+
+.route-stage {
+  animation: route-enter 220ms cubic-bezier(.22, 1, .36, 1);
+}
+
+@keyframes route-enter {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-stage {
+    animation: none !important;
+  }
+}
