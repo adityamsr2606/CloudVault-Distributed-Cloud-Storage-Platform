@@ -1,12 +1,13 @@
 import { Download, Share2, Star, Trash2 } from "lucide-react";
+import { useState } from "react";
 
 import {
   VaultFile,
-  createShareLink,
   getDownloadUrl,
   softDelete,
   toggleStar,
 } from "../lib/cloudvault";
+import ShareDialog from "./ShareDialog";
 
 export default function FileActions({
   file,
@@ -17,22 +18,13 @@ export default function FileActions({
   onChange: () => void;
   onMessage: (message: string) => void;
 }) {
+  const [sharing, setSharing] = useState(false);
+
   async function download() {
     try {
       window.open(await getDownloadUrl(file), "_blank", "noopener,noreferrer");
     } catch (error) {
       onMessage(error instanceof Error ? error.message : "Download failed");
-    }
-  }
-
-  async function share() {
-    try {
-      const link = await createShareLink(file.id);
-      const url = `${window.location.origin}/s/${link.token}`;
-      await navigator.clipboard.writeText(url);
-      onMessage("Secure 24-hour share link copied.");
-    } catch (error) {
-      onMessage(error instanceof Error ? error.message : "Share link failed");
     }
   }
 
@@ -56,13 +48,23 @@ export default function FileActions({
   }
 
   return (
-    <div className="hover-actions">
-      <button aria-label={file.is_starred ? "Unstar file" : "Star file"} onClick={star}>
-        <Star size={15} fill={file.is_starred ? "currentColor" : "none"} />
-      </button>
-      <button aria-label="Download file" onClick={download}><Download size={15} /></button>
-      <button aria-label="Create share link" onClick={share}><Share2 size={15} /></button>
-      <button aria-label="Move to trash" onClick={remove}><Trash2 size={15} /></button>
-    </div>
+    <>
+      <div className="hover-actions">
+        <button aria-label={file.is_starred ? "Unstar file" : "Star file"} onClick={star}>
+          <Star size={15} fill={file.is_starred ? "currentColor" : "none"} />
+        </button>
+        <button aria-label="Download file" onClick={download}><Download size={15} /></button>
+        <button aria-label="Create share link" onClick={() => setSharing(true)}><Share2 size={15} /></button>
+        <button aria-label="Move to trash" onClick={remove}><Trash2 size={15} /></button>
+      </div>
+
+      {sharing && (
+        <ShareDialog
+          file={file}
+          onClose={() => setSharing(false)}
+          onMessage={onMessage}
+        />
+      )}
+    </>
   );
 }
