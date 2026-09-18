@@ -7,6 +7,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { getProductSettings } from "../config/product";
+
 export type ThemePreference = "light" | "dark" | "system";
 type ResolvedTheme = "light" | "dark";
 
@@ -32,6 +34,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [system, setSystem] = useState<ResolvedTheme>(() => systemTheme());
 
   useEffect(() => {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) {
+      void getProductSettings().then((settings) => setPreferenceState(settings.default_theme));
+    }
+  }, []);
+
+  useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: light)");
     const onChange = () => setSystem(media.matches ? "light" : "dark");
     media.addEventListener("change", onChange);
@@ -47,11 +56,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [preference, resolved]);
 
   const value = useMemo(
-    () => ({
-      preference,
-      resolved,
-      setPreference: (theme: ThemePreference) => setPreferenceState(theme),
-    }),
+    () => ({ preference, resolved, setPreference: setPreferenceState }),
     [preference, resolved],
   );
 
