@@ -343,3 +343,193 @@ on conflict (owner_id) do nothing;
 grant select, insert, update, delete on public.multipart_uploads to authenticated;
 grant select, insert, update on public.user_preferences to authenticated;
 grant select, insert on public.ai_query_events to authenticated;
+
+
+alter table public.vault_folders
+  add column if not exists trash_root_id uuid,
+  add column if not exists trash_previous_parent_id uuid;
+
+alter table public.vault_files
+  add column if not exists trashed_by_folder_id uuid;
+
+create index if not exists vault_folders_trash_root_idx
+on public.vault_folders(owner_id, trash_root_id)
+where trash_root_id is not null;
+
+create index if not exists vault_files_trashed_by_folder_idx
+on public.vault_files(owner_id, trashed_by_folder_id)
+where trashed_by_folder_id is not null;
+
+create or replace function public.trash_vault_folder(p_folder_id uuid)
+returns table (folders_trashed integer, files_trashed integer)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_owner uuid := (select auth.uid());
+  v_folder_ids uuid[];
+  v_root_parent uuid;
+  v_folders integer := 0;
+  v_files integer := 0;
+begin
+  if v_owner is null then
+    raise exception 'Authentication required';
+  end if;
+
+  select parent_id
+  into v_root_parent
+  from public.vault_folders
+  where id = p_folder_id
+    and owner_id = v_owner
+    and deleted_at is null;
+
+  if not found then
+    raise exception 'Folder not found';
+  end if;
+
+  with recursive folder_tree as (
+    select id
+    from public.vault_folders
+    where id = p_folder_id
+      and owner_id = v_owner
+      and deleted_at is null
+
+    union all
+
+    select child.id
+    from public.vault_folders child
+    join folder_tree parent on child.parent_id = parent.id
+    where child.owner_id = v_owner
+      and child.deleted_at is null
+  )
+  select array_agg(id)
+  into v_folder_ids
+  from folder_tree;
+
+  update public.vault_files
+  set
+    deleted_at = now(),
+    status = 'deleted',
+    trashed_by_folder_id = p_folder_id,
+    updated_at = now()
+  where owner_id = v_owner
+    and folder_id = any(v_folder_ids)
+    and deleted_at is null;
+
+  get diagnostics v_files = row_count;
+
+  update public.vault_folders
+  set
+    deleted_at = now(),
+    trash_root_id = p_folder_id,
+    trash_previous_parent_id =
+      case when id = p_folder_id then v_root_parent else trash_previous_parent_id end,
+    parent_id =
+      case when id = p_folder_id then null else parent_id end,
+    updated_at = now()
+  where owner_id = v_owner
+    and id = any(v_folder_ids)
+    and deleted_at is null;
+
+  get diagnostics v_folders = row_count;
+
+  insert into public.activity_events(owner_id, file_id, event_type, detail)
+  values (
+    v_owner,
+    null,
+    'folder_deleted',
+    jsonb_build_object(
+      'folder_id', p_folder_id,
+      'folders', v_folders,
+      'files', v_files
+    )
+  );
+
+  return query select v_folders, v_files;
+end;
+$$;
+
+grant execute on function public.trash_vault_folder(uuid) to authenticated;
+
+create or replace function public.restore_vault_folder(p_folder_id uuid)
+returns table (folders_restored integer, files_restored integer)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_owner uuid := (select auth.uid());
+  v_previous_parent uuid;
+  v_restore_parent uuid;
+  v_folders integer := 0;
+  v_files integer := 0;
+begin
+  if v_owner is null then
+    raise exception 'Authentication required';
+  end if;
+
+  select trash_previous_parent_id
+  into v_previous_parent
+  from public.vault_folders
+  where id = p_folder_id
+    and owner_id = v_owner
+    and deleted_at is not null
+    and trash_root_id = p_folder_id;
+
+  if not found then
+    raise exception 'Trashed folder not found';
+  end if;
+
+  if v_previous_parent is not null and exists (
+    select 1
+    from public.vault_folders
+    where id = v_previous_parent
+      and owner_id = v_owner
+      and deleted_at is null
+  ) then
+    v_restore_parent := v_previous_parent;
+  else
+    v_restore_parent := null;
+  end if;
+
+  update public.vault_folders
+  set
+    deleted_at = null,
+    parent_id = case when id = p_folder_id then v_restore_parent else parent_id end,
+    trash_root_id = null,
+    trash_previous_parent_id = null,
+    updated_at = now()
+  where owner_id = v_owner
+    and trash_root_id = p_folder_id;
+
+  get diagnostics v_folders = row_count;
+
+  update public.vault_files
+  set
+    deleted_at = null,
+    status = 'ready',
+    trashed_by_folder_id = null,
+    updated_at = now()
+  where owner_id = v_owner
+    and trashed_by_folder_id = p_folder_id;
+
+  get diagnostics v_files = row_count;
+
+  insert into public.activity_events(owner_id, file_id, event_type, detail)
+  values (
+    v_owner,
+    null,
+    'folder_restored',
+    jsonb_build_object(
+      'folder_id', p_folder_id,
+      'folders', v_folders,
+      'files', v_files
+    )
+  );
+
+  return query select v_folders, v_files;
+end;
+$$;
+
+grant execute on function public.restore_vault_folder(uuid) to authenticated;
