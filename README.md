@@ -1,296 +1,105 @@
-#  CloudVault
+# CloudVault
 
-> **A Production-Grade Distributed Cloud Storage Platform Inspired by Modern SaaS Architecture**
+> Distributed file storage with asynchronous AI retrieval.
 
-CloudVault is a cloud-native, distributed file storage platform designed with scalability, reliability, and security at its core. Built using a modern microservices-inspired architecture, the platform enables secure file management, asynchronous processing, intelligent caching, comprehensive monitoring, and seamless cloud deployment.
+CloudVault is a cloud-native storage platform built around secure file ownership, S3-compatible object storage, versioned metadata, asynchronous processing, and hybrid lexical + semantic search.
 
-The project demonstrates software engineering best practices including clean architecture, RESTful API design, containerization, CI/CD, observability, automated testing, and production-ready deployment.
+This repository is under active development. The sections below separate what is implemented from planned work so the project does not claim functionality that is not backed by code.
 
----
+## Implemented
 
-##  Features
+- FastAPI REST API with JWT access/refresh authentication
+- Argon2 password hashing and per-user authorization boundaries
+- PostgreSQL metadata model with storage quotas
+- MinIO/S3-compatible file upload and download
+- Immutable file version records
+- Soft delete and restore
+- RabbitMQ + Celery asynchronous indexing
+- Elasticsearch keyword + vector retrieval
+- Sentence Transformers embeddings
+- User-scoped semantic search
+- Storage summary endpoint
+- Prometheus-compatible metrics endpoint
+- React + TypeScript authenticated web client
+- Docker Compose local stack
+- Alembic migrations
+- Pytest + Ruff + frontend build checks in GitHub Actions
 
-### Authentication & Authorization
+## AI design
 
-* JWT Authentication
-* Refresh Tokens
-* Google OAuth 2.0
-* Role-Based Access Control (RBAC)
-* Secure Password Hashing
-* Email Verification
-* Password Reset
+CloudVault does not use a generic chatbot as its AI feature. Uploaded files are indexed asynchronously and represented as embeddings for semantic retrieval. Search combines lexical signals with vector similarity while filtering by the authenticated owner in both retrieval paths.
 
-### File Management
+The current embedding model is configurable and defaults to `sentence-transformers/all-MiniLM-L6-v2`. The next hardening stage adds chunk-level indexing, model/index version metadata, MIME-specific extraction and retrieval evaluation before document Q&A is considered.
 
-* Secure File Upload & Download
-* Multipart Uploads
-* File Versioning
-* Folder Hierarchy
-* File Sharing
-* Public & Private Links
-* Storage Quotas
-* Soft Delete & Restore
-* File Metadata Management
+## Architecture
 
-### Search & Analytics
+```text
+React + TypeScript
+        |
+      Nginx
+        |
+      FastAPI
+      /     \
+PostgreSQL  MinIO
+        \     |
+        RabbitMQ
+           |
+         Celery
+           |
+Sentence Transformers
+           |
+     Elasticsearch
+           |
+ lexical + vector search
 
-* Global File Search
-* Advanced Filters
-* User Activity Logs
-* Storage Analytics
-* Download Statistics
-* Dashboard Insights
-
-### Performance & Scalability
-
-* Redis Caching
-* Asynchronous Background Processing
-* Queue-Based Task Execution
-* Horizontal Scalability
-* Optimized Database Queries
-* API Rate Limiting
-
-### Monitoring & Observability
-
-* Prometheus Metrics
-* Grafana Dashboards
-* Structured Logging
-* Health Checks
-* Centralized Monitoring
-
-### Security
-
-* JWT Authentication
-* OAuth 2.0
-* HTTPS
-* Secure File Access
-* Input Validation
-* SQL Injection Protection
-* XSS Protection
-* CSRF Protection
-* Secure API Design
-
----
-
-##  System Architecture
-
-```
-                    React + TypeScript
-
-                           │
-                    API Gateway (FastAPI)
-
-      ┌───────────────┬───────────────┬───────────────┐
-      │               │               │
- Authentication   Storage Service   Search Service
-      │               │               │
- PostgreSQL       MinIO Storage   Elasticsearch
-      │
- Redis Cache
-      │
- Celery Workers
-      │
- RabbitMQ
-      │
- Prometheus
-      │
- Grafana
+Redis -> task result/cache foundation
+Prometheus -> /metrics
 ```
 
----
+## Run locally
 
-##  Tech Stack
-
-### Backend
-
-* Python
-* FastAPI
-* SQLAlchemy
-* Alembic
-* Pydantic
-
-### Frontend
-
-* React
-* TypeScript
-* Tailwind CSS
-* Framer Motion
-
-### Database
-
-* PostgreSQL
-
-### Caching
-
-* Redis
-
-### Background Processing
-
-* Celery
-* RabbitMQ
-
-### Object Storage
-
-* MinIO (S3 Compatible)
-
-### Infrastructure
-
-* Docker
-* Docker Compose
-* Nginx
-* AWS
-
-### Monitoring
-
-* Prometheus
-* Grafana
-
-### Testing
-
-* Pytest
-* HTTPX
-* Locust
-
-### DevOps
-
-* GitHub Actions
-* CI/CD
-* Docker Registry
-
----
-
-##  Project Structure
-
-```
-CloudVault/
-
-├── backend/
-│   ├── app/
-│   ├── api/
-│   ├── core/
-│   ├── database/
-│   ├── services/
-│   ├── models/
-│   ├── workers/
-│   └── tests/
-│
-├── frontend/
-│   ├── src/
-│   ├── components/
-│   ├── pages/
-│   ├── hooks/
-│   └── assets/
-│
-├── infrastructure/
-│   ├── docker/
-│   ├── nginx/
-│   ├── monitoring/
-│   └── kubernetes/
-│
-├── docs/
-├── scripts/
-├── .github/
-└── README.md
+```bash
+cp .env.example .env
+# replace SECRET_KEY and MINIO_SECRET_KEY
+docker compose up --build
 ```
 
----
+Then open:
 
-##  Highlights
+- Web client: http://localhost:5173
+- API docs: http://localhost:8000/docs
+- Health: http://localhost:8000/health
+- MinIO console: http://localhost:9001
 
-* Production-ready REST API
-* Clean Architecture
-* Modular Design
-* Fully Containerized
-* Cloud-Native Deployment
-* Scalable Background Workers
-* Enterprise Authentication
-* Advanced Monitoring
-* Secure File Storage
-* Professional SaaS UI
+## Quality checks
 
----
+```bash
+cd backend
+ruff check .
+pytest
+```
 
-##  Planned Performance Goals
+```bash
+cd frontend
+npm install
+npm run build
+```
 
-* Support 1M+ simulated file operations
-* 20+ REST API endpoints
-* Sub-200 ms response time for cached requests
-* Horizontal service scalability
-* Comprehensive automated test coverage
+GitHub Actions runs these checks on pushes and pull requests.
 
----
+## Roadmap
 
-##  Testing
+The original product scope also includes folder hierarchy, expiring/public sharing, Google OAuth, email verification, password reset, Redis-backed rate limiting, richer activity analytics, Grafana dashboards, multipart uploads, deployment hardening and load testing. These remain roadmap items until implemented and validated.
 
-* Unit Testing
-* Integration Testing
-* API Testing
-* Load Testing
-* Performance Benchmarking
+Planned AI hardening:
 
----
+- chunk-level document indexing
+- PDF/DOCX extraction with explicit MIME handling
+- embedding/chunking version tracking
+- near-duplicate discovery
+- Recall@K, MRR and nDCG retrieval evaluation
+- grounded document Q&A only after retrieval quality is measurable
 
-##  Security
+## Author
 
-* JWT Authentication
-* OAuth 2.0
-* Role-Based Access Control
-* Password Hashing
-* Input Validation
-* Rate Limiting
-* Secure Headers
-* HTTPS Support
-
----
-
-##  Deployment
-
-The application is designed for production deployment using Docker and cloud infrastructure with support for:
-
-* AWS EC2
-* AWS S3 / MinIO
-* PostgreSQL
-* Redis
-* RabbitMQ
-* Nginx Reverse Proxy
-* GitHub Actions CI/CD
-
----
-
-##  Documentation
-
-The repository includes:
-
-* Software Requirements Specification (SRS)
-* High-Level Design (HLD)
-* Low-Level Design (LLD)
-* API Documentation
-* Database ER Diagram
-* Architecture Diagrams
-* Deployment Guide
-* User Guide
-
----
-
-##  Learning Objectives
-
-This project demonstrates practical experience in:
-
-* Backend Development
-* Distributed Systems
-* REST API Design
-* Database Design
-* Cloud Computing
-* System Design
-* Asynchronous Programming
-* Containerization
-* DevOps
-* Software Architecture
-
----
-
-##  Author
-
-**Aditya Mohan Srivastava**
-
-Aspiring Software Development Engineer focused on building scalable, cloud-native backend systems with modern software engineering practices.
+Aditya Mohan Srivastava
