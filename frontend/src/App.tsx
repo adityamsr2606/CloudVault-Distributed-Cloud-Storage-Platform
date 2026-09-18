@@ -8,6 +8,7 @@ import ActivityPage from "./pages/ActivityPage";
 import AuthPage from "./pages/AuthPage";
 import DashboardPage from "./pages/DashboardPage";
 import IntelligencePage from "./pages/IntelligencePage";
+import LandingPage from "./pages/LandingPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import SettingsPage from "./pages/SettingsPage";
 import ShareResolvePage from "./pages/ShareResolvePage";
@@ -42,6 +43,7 @@ export default function App() {
 
   return (
     <Routes>
+      <Route path="/" element={<LandingPage />} />
       <Route path="/auth" element={<AuthPage sessionReady={Boolean(session)} />} />
       <Route path="/s/:token" element={<ShareResolvePage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -55,7 +57,7 @@ export default function App() {
         <Route path="/app/trash" element={<TrashPage />} />
         <Route path="/app/settings" element={<SettingsPage />} />
       </Route>
-      <Route path="*" element={<Navigate to={session ? "/app" : "/auth"} replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
