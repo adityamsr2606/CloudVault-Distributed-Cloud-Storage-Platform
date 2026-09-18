@@ -51,6 +51,8 @@ export default function AppShell() {
               key={to}
               to={to}
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              aria-label={label}
+              title={label}
             >
               <Icon size={17} />
               <span>{label}</span>
