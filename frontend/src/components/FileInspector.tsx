@@ -3,9 +3,11 @@ import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 import {
   FileVersion,
+  RelatedFile,
   VaultFile,
   getVersionDownloadUrl,
   listFileVersions,
+  relatedFiles,
   replaceVaultFile,
 } from "../lib/cloudvault";
 
@@ -27,13 +29,17 @@ export default function FileInspector({
   onMessage: (message: string) => void;
 }) {
   const [versions, setVersions] = useState<FileVersion[]>([]);
+  const [related, setRelated] = useState<RelatedFile[]>([]);
   const [busy, setBusy] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    void listFileVersions(file.id)
-      .then(setVersions)
-      .catch((error) => onMessage(error instanceof Error ? error.message : "Could not load versions"));
+    void Promise.all([listFileVersions(file.id), relatedFiles(file.id)])
+      .then(([nextVersions, nextRelated]) => {
+        setVersions(nextVersions);
+        setRelated(nextRelated);
+      })
+      .catch((error) => onMessage(error instanceof Error ? error.message : "Could not load file intelligence"));
   }, [file.id, onMessage]);
 
   async function replace(event: ChangeEvent<HTMLInputElement>) {
@@ -85,6 +91,20 @@ export default function FileInspector({
           <RefreshCcw size={15} /> {busy ? "Uploading…" : "Upload new version"}
         </button>
         <input ref={picker} hidden type="file" onChange={replace} />
+
+        {related.length > 0 && (
+          <section className="related-section">
+            <div className="version-title"><History size={15} /><strong>Related in your vault</strong></div>
+            <div className="related-list">
+              {related.map((item) => (
+                <div key={item.file_id} className="related-row">
+                  <span><strong>{item.name}</strong><small>Semantic similarity</small></span>
+                  <em>{Math.round(Math.max(0, item.similarity) * 100)}%</em>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="version-section">
           <div className="version-title"><History size={15} /><strong>Version history</strong></div>

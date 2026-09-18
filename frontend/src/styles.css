@@ -2028,3 +2028,61 @@ button.file-glyph {
     grid-template-columns: 1fr;
   }
 }
+
+
+.related-section {
+  margin-top: 24px;
+}
+
+.related-list {
+  display: grid;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.related-row {
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+
+.related-row:last-child {
+  border-bottom: 0;
+}
+
+.related-row:hover {
+  background: var(--accent-soft);
+}
+
+.related-row > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.related-row strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 640;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.related-row small {
+  color: var(--faint);
+  font-size: 8px;
+}
+
+.related-row em {
+  color: var(--accent);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+}

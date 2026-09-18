@@ -364,3 +364,51 @@ $$;
 
 revoke all on function public.consume_share_link(text) from public, anon, authenticated;
 grant execute on function public.consume_share_link(text) to service_role;
+
+
+create or replace function public.related_vault_files(
+  source_file_id uuid,
+  match_count integer default 6
+)
+returns table (
+  file_id uuid,
+  name text,
+  similarity double precision
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  with source_chunks as (
+    select c.embedding
+    from public.file_chunks c
+    where c.file_id = source_file_id
+      and c.owner_id = (select auth.uid())
+      and c.embedding is not null
+  ),
+  candidate_scores as (
+    select
+      c.file_id,
+      f.name,
+      max(
+        1 - (c.embedding OPERATOR(extensions.<=>) s.embedding)
+      )::double precision as similarity
+    from public.file_chunks c
+    join public.vault_files f on f.id = c.file_id
+    cross join source_chunks s
+    where c.owner_id = (select auth.uid())
+      and f.owner_id = (select auth.uid())
+      and f.deleted_at is null
+      and c.file_id <> source_file_id
+      and c.embedding is not null
+    group by c.file_id, f.name
+  )
+  select file_id, name, similarity
+  from candidate_scores
+  order by similarity desc
+  limit least(greatest(match_count, 1), 12);
+$$;
+
+grant execute on function public.related_vault_files(uuid, integer)
+to authenticated;

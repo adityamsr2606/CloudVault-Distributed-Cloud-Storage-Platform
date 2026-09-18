@@ -49,6 +49,12 @@ export type SearchResult = {
   similarity: number;
 };
 
+export type RelatedFile = {
+  file_id: string;
+  name: string;
+  similarity: number;
+};
+
 export type ShareLink = {
   id: string;
   file_id: string;
@@ -331,6 +337,16 @@ export async function getDownloadUrl(file: VaultFile) {
 
   if (error) throw error;
   return data.signedUrl;
+}
+
+export async function relatedFiles(fileId: string) {
+  const { data, error } = await supabase.rpc("related_vault_files", {
+    source_file_id: fileId,
+    match_count: 6,
+  });
+
+  if (error) throw error;
+  return (data ?? []) as RelatedFile[];
 }
 
 export async function semanticSearch(query: string) {
