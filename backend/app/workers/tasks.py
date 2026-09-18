@@ -2,9 +2,10 @@ from uuid import UUID
 
 from celery.utils.log import get_task_logger
 
+from app.core.config import get_settings
 from app.database.session import SessionLocal
 from app.models import FileObject, FileStatus
-from app.services.ai import embed_text, extract_text
+from app.services.ai import chunk_text, embed_texts, extract_text
 from app.services.search import get_search_service
 from app.services.storage import get_storage_service
 from app.workers.celery_app import celery_app
@@ -31,20 +32,27 @@ def index_file(self, file_id: str) -> None:
 
         data = get_storage_service().download_bytes(file.object_key)
         text = extract_text(file.name, file.mime_type, data)
-        embedding = embed_text(text[:12000])
+        chunks = chunk_text(text) or [file.name]
+        embeddings = embed_texts(chunks)
 
+        settings = get_settings()
         search = get_search_service()
-        search.ensure_index(dimensions=len(embedding))
-        search.index_document(
+        search.ensure_index(dimensions=len(embeddings[0]))
+        search.replace_file_chunks(
             str(file.id),
-            {
-                "file_id": str(file.id),
-                "owner_id": str(file.owner_id),
-                "name": file.name,
-                "mime_type": file.mime_type,
-                "content": text,
-                "embedding": embedding,
-            },
+            [
+                {
+                    "file_id": str(file.id),
+                    "owner_id": str(file.owner_id),
+                    "chunk_number": number,
+                    "index_version": settings.ai_index_version,
+                    "name": file.name,
+                    "mime_type": file.mime_type,
+                    "content": chunk,
+                    "embedding": embedding,
+                }
+                for number, (chunk, embedding) in enumerate(zip(chunks, embeddings, strict=True))
+            ],
         )
 
         file.status = FileStatus.READY
