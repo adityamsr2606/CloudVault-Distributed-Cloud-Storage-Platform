@@ -1,8 +1,10 @@
 import { ChevronRight, Folder, FolderPlus, Grid2X2, List, Upload } from "lucide-react";
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import FileActions from "../components/FileActions";
 import FileInspector from "../components/FileInspector";
+import { getProductSettings, type ProductSettings } from "../config/product";
+import { useRealtimeRefresh } from "../hooks/useRealtimeRefresh";
 import {
   VaultFile,
   VaultFolder,
@@ -21,6 +23,7 @@ function bytes(value: number) {
 export default function VaultPage({ starredOnly = false }: { starredOnly?: boolean }) {
   const [allFiles, setAllFiles] = useState<VaultFile[]>([]);
   const [folders, setFolders] = useState<VaultFolder[]>([]);
+  const [settings, setSettings] = useState<ProductSettings | null>(null);
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<VaultFile | null>(null);
   const [message, setMessage] = useState("");
@@ -28,20 +31,27 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
   const [view, setView] = useState<"list" | "grid">("list");
   const picker = useRef<HTMLInputElement>(null);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     try {
-      const [nextFiles, nextFolders] = await Promise.all([listFiles(), listFolders()]);
+      const [nextFiles, nextFolders, nextSettings] = await Promise.all([
+        listFiles(),
+        listFolders(),
+        getProductSettings(),
+      ]);
       setAllFiles(starredOnly ? nextFiles.filter((file) => file.is_starred) : nextFiles);
       setFolders(nextFolders);
+      setSettings(nextSettings);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not load files");
     }
-  }
+  }, [starredOnly]);
 
   useEffect(() => {
     setActiveFolder(null);
     void refresh();
-  }, [starredOnly]);
+  }, [refresh]);
+
+  useRealtimeRefresh(["vault_files", "vault_folders", "product_settings"], refresh);
 
   const activeFolderRecord = folders.find((folder) => folder.id === activeFolder) ?? null;
   const files = useMemo(
@@ -60,8 +70,7 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
     setMessage("");
     try {
       await uploadVaultFile(file, activeFolder);
-      setMessage("Uploaded. Private AI indexing continues in the background.");
-      await refresh();
+      setMessage(settings?.ai_enabled ? "Uploaded. Private AI indexing is running." : "Uploaded.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Upload failed");
     } finally {
@@ -75,7 +84,6 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
     if (!name?.trim()) return;
     try {
       await createFolder(name, activeFolder);
-      await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not create folder");
     }
@@ -90,7 +98,7 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
           <p>Only files owned by your signed-in account can appear here.</p>
         </div>
         <div className="header-actions">
-          {!starredOnly && (
+          {!starredOnly && settings?.folders_enabled !== false && (
             <button className="ghost-button" onClick={newFolder}>
               <FolderPlus size={16} /> New folder
             </button>
@@ -106,7 +114,7 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
 
       {message && <div className="inline-message">{message}</div>}
 
-      {!starredOnly && (
+      {!starredOnly && settings?.folders_enabled !== false && (
         <div className="vault-breadcrumb">
           <button className={!activeFolder ? "active" : ""} onClick={() => setActiveFolder(null)}>
             My vault
@@ -120,7 +128,7 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
         </div>
       )}
 
-      {!starredOnly && visibleFolders.length > 0 && (
+      {!starredOnly && settings?.folders_enabled !== false && visibleFolders.length > 0 && (
         <section className="folder-strip">
           {visibleFolders.map((folder) => (
             <button className="folder-chip" key={folder.id} onClick={() => setActiveFolder(folder.id)}>
@@ -146,7 +154,9 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
         <div className={view === "grid" ? "file-grid" : "file-list"}>
           {files.map((file) => (
             <div className={view === "grid" ? "file-tile" : "file-row"} key={file.id}>
-              <button className="file-glyph" onClick={() => setSelectedFile(file)}>{file.name.slice(0, 1).toUpperCase()}</button>
+              <button className="file-glyph" onClick={() => setSelectedFile(file)}>
+                {file.name.slice(0, 1).toUpperCase()}
+              </button>
               <button className="file-main file-open" onClick={() => setSelectedFile(file)}>
                 <strong>{file.name}</strong>
                 <span>{bytes(file.size_bytes)} · v{file.current_version}</span>
@@ -160,8 +170,8 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
               {starredOnly
                 ? "No starred files yet."
                 : activeFolderRecord
-                  ? "This folder is empty. Upload a file here or create a nested folder."
-                  : "Your vault is empty. Upload the first file or create a folder."}
+                  ? "This folder is empty."
+                  : "Your vault is empty. Upload the first file."}
             </div>
           )}
         </div>
