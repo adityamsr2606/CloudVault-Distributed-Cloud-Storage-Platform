@@ -1,6 +1,7 @@
 import { Activity } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { useRealtimeRefresh } from "../hooks/useRealtimeRefresh";
 import { ActivityEvent, listActivity } from "../lib/cloudvault";
 
 const labels: Record<string, string> = {
@@ -16,15 +17,25 @@ export default function ActivityPage() {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
-    void listActivity().then(setEvents).catch((error) => setMessage(error instanceof Error ? error.message : "Could not load activity"));
+  const refresh = useCallback(async () => {
+    try {
+      setEvents(await listActivity());
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not load activity");
+    }
   }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+  useRealtimeRefresh(["activity_events"], refresh);
 
   return (
     <div className="page-wrap">
-      <header className="page-header"><div><p className="eyebrow">Audit trail</p><h1>Activity</h1><p>System-generated file lifecycle events from the database.</p></div><div className="ai-badge"><Activity size={16}/> immutable events</div></header>
+      <header className="page-header">
+        <div><p className="eyebrow">Live audit trail</p><h1>Activity</h1><p>Database-generated lifecycle events appear here automatically.</p></div>
+        <div className="ai-badge"><Activity size={16}/> realtime</div>
+      </header>
       {message && <div className="inline-message">{message}</div>}
-      <section className="timeline glass-panel">
+      <section className="timeline">
         {events.map((event) => (
           <div className="timeline-item" key={event.id}>
             <span className="timeline-dot" />
