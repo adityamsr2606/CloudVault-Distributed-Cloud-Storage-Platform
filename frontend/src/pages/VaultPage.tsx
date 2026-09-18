@@ -253,7 +253,8 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
                 onClick={() => void moveFolderToTrash(folder)}
                 disabled={uploadBusy}
               >
-                <Trash2 size={14} />
+                <Trash2 size={13} />
+                <span>Trash</span>
               </button>
             </div>
           ))}
