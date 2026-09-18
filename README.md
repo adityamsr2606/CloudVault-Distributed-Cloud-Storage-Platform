@@ -17,6 +17,14 @@ The repository has two intentional runtime profiles:
 
 No benchmark, scale, retrieval-quality, or large-upload claim is presented as measured until it has actually been tested.
 
+## Production validation evidence
+
+Measured and verified release evidence is recorded in
+[`docs/PRODUCTION_VALIDATION.md`](docs/PRODUCTION_VALIDATION.md).
+
+Current measured PostgreSQL baselines on the tiny production dataset are documented there
+separately from end-to-end latency so they are not misrepresented as scalability claims.
+
 ## CloudVault v2
 
 CloudVault v2 focuses on storage reliability, account security, retrieval quality, privacy-aware AI, observability, and recoverable file/folder lifecycle operations.
@@ -427,7 +435,7 @@ The code is complete for these paths, but the hosted deployment still needs prov
 - **Cloudflare R2**: bucket, scoped credentials, production CORS, then `r2_enabled=true`
 - **Passkeys**: Supabase project WebAuthn/passkey configuration for the final production domain
 - **Gemini generation**: server-side API key + deployment enablement + per-user consent
-- **Supabase leaked-password protection**: account-level Auth toggle
+- **Supabase leaked-password protection**: Pro-plan-only control; unavailable while CloudVault keeps the free-only hosting constraint. The web UI enforces a stronger 12+ character mixed-password policy for new registrations and resets as a separate mitigation.
 - **Supabase Auth redirect allowlist**: final production reset-password domain
 
 ## Remaining optional extensions
