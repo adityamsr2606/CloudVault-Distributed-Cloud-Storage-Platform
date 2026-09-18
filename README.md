@@ -1,188 +1,187 @@
 # CloudVault
 
-> Distributed cloud storage with secure object persistence, asynchronous processing, and tenant-scoped semantic retrieval.
+> Personal cloud storage with secure file lifecycle management, realtime state, and owner-scoped semantic retrieval.
 
-CloudVault is a full-stack storage platform built to explore the engineering problems behind modern cloud-drive products: durable object storage, metadata consistency, authentication, background work, search, observability, containerized deployment, and AI-assisted retrieval.
+CloudVault is a full-stack storage platform built around one security rule: **a signed-in user can only discover and access content they own or content explicitly shared with them through a temporary link**.
 
-The repository is being implemented incrementally. The sections below distinguish what exists in code today from the broader roadmap so the project does not claim features that have not been built or measured.
+The repository has two intentional runtime profiles:
 
-## Free production deployment
+- a **free public product profile** using Vercel + Supabase
+- a **local distributed-systems profile** using FastAPI, PostgreSQL, MinIO, RabbitMQ, Celery, Redis, Elasticsearch, Prometheus, and Grafana
 
-CloudVault has two intentional runtime profiles.
+No benchmark, scale, or retrieval-quality number is claimed unless it has actually been measured.
 
-### Public deployment — $0 subscription target
+## Product experience
 
-The public web application is designed to stay within free managed tiers:
+The public application includes:
+
+- custom CloudVault visual identity
+- Light / Dark / System themes
+- animated ambient wallpapers with reduced-motion support
+- public product landing page
+- email/password registration and login
+- password recovery
+- private per-user vault
+- folder hierarchy and nested folders
+- file upload and signed download
+- SHA-256 exact duplicate prevention
+- immutable file versions
+- upload-new-version workflow
+- restore an older version as a new current version
+- starred files
+- soft delete, restore, and permanent purge
+- configurable expiring share links
+- configurable usage-limited share links
+- share-link revocation and live usage counters
+- realtime file/folder/activity/share/settings updates
+- activity audit trail
+- semantic search
+- related-file intelligence
+- Cmd/Ctrl+K command/search surface
+- responsive desktop/tablet/mobile navigation
+
+## Free production profile
 
 ```text
-Vercel Hobby
-    |
+Browser
+  |
 React + TypeScript + Vite
-    |
+  |
+Vercel Hobby
+  |
 Supabase Free
-    |-- Auth
-    |-- Postgres + RLS
-    |-- Storage
-    |-- pgvector
-    |-- Edge Functions
-    +-- built-in gte-small embeddings
+  |-- Auth
+  |-- PostgreSQL
+  |-- Row Level Security
+  |-- Private Storage
+  |-- Realtime
+  |-- Edge Functions
+  |-- pgvector
+  +-- built-in gte-small embeddings
 ```
 
-This production profile avoids paid AI APIs and paid vector databases. Semantic retrieval uses Supabase's built-in `gte-small` model and `pgvector`. File objects stay in a private Storage bucket and are served through short-lived signed URLs.
+Core production functionality does not require OpenAI, Gemini, Pinecone, Elasticsearch Cloud, or a paid queue.
 
-The application intentionally does not require OpenAI, Pinecone, Elasticsearch Cloud, a paid queue, or another subscription to remain functional. If a free-tier quota is exhausted, the expected behavior is service degradation or suspension rather than automatically creating a paid bill.
+Gemini is intentionally optional and disabled by default. Private files are not sent to a generative model merely to make the project look more "AI-enabled".
 
-### Local distributed-systems profile
+## Privacy model
 
-The Docker Compose stack remains in the repository because it demonstrates a deeper SDE/system-design architecture:
+Privacy is enforced below React.
 
-- FastAPI API layer
-- PostgreSQL metadata
-- MinIO object storage
-- RabbitMQ + Celery background processing
-- Redis task results
-- Elasticsearch hybrid search
-- Prometheus + Grafana observability
+### Database isolation
 
-The two profiles solve different problems: the public profile optimizes for a genuinely free live demo; the local profile demonstrates distributed-system boundaries and operational engineering.
+RLS policies scope these resources to `auth.uid()`:
 
-### Production product surface
-
-The public web application now includes:
-
-- Overview dashboard
-- My Vault file browser
+- files
 - folders
-- starred files
-- semantic Intelligence search
-- secure expiring share links
-- activity audit trail
-- trash and restore
-- settings/system status
-- responsive mobile navigation
-- animated live background with reduced-motion support
-- contextual hover actions for common file operations
+- file versions
+- embedding chunks
+- activity events
+- share-link management records
 
-## Current implementation
+### Storage isolation
 
-### Identity and access
+The private Storage bucket uses paths whose first segment is the authenticated user id. Storage policies verify that path segment before select, insert, update, or delete.
 
-- Email/password registration and login
-- Argon2 password hashing
-- JWT access and refresh tokens
-- Authenticated API dependencies
-- User roles represented in the data model
-- Per-user storage quotas
+### Semantic retrieval isolation
 
-### File storage
+Both semantic search and related-file retrieval explicitly filter vectors by the current authenticated owner. AI retrieval therefore follows the same access boundary as relational metadata.
 
-- Authenticated file upload and download
-- MinIO-backed S3-compatible object storage
-- PostgreSQL file metadata
-- SHA-256 content fingerprints
-- Upload-size validation
-- Storage quota enforcement
-- Immutable file-version records
-- File replacement with version history
-- Soft deletion and restore
-- Storage summary endpoint
-- Compensating object deletion when metadata persistence fails
+### Public sharing
 
-### AI retrieval
+A user must deliberately create a share link for a specific file. Only the token hash is persisted. Public resolution returns a short-lived signed Storage URL. Links can expire, have a usage limit, or be revoked.
 
-- Sentence Transformer embeddings
-- Text, PDF, and DOCX extraction
-- Overlapping document chunking
-- Batch embedding generation
-- Elasticsearch dense-vector indexing
-- Hybrid lexical + vector retrieval
-- Per-user authorization filters inside retrieval
-- File-level result deduplication
-- Asynchronous indexing through Celery and RabbitMQ
-- Embedding-model metadata stored with indexed chunks
+## Configurable product policy
 
-The AI subsystem is intentionally retrieval-focused. It is not a generic chatbot. Files are transformed into searchable semantic representations so users can find relevant documents by meaning while authorization remains enforced at search time.
+Business rules are stored in `public.product_settings`, rather than scattered as component constants.
 
-### Platform engineering
+Configurable settings include:
 
-- FastAPI backend
-- SQLAlchemy data model
-- Alembic migrations
-- React + TypeScript frontend
-- Tailwind CSS
-- Nginx frontend container
+- upload-size limit
+- default/max share expiry
+- default/max share uses
+- semantic-search result limit
+- related-file result limit
+- indexable-text byte/character limits
+- AI enablement
+- sharing enablement
+- folders enablement
+- versioning enablement
+- duplicate-detection enablement
+- default theme
+- deployment-region label
+- AI chunk size and overlap
+- signed-link lifetime
+
+The Storage bucket size limit is synchronized from the same configuration.
+
+## Realtime behavior
+
+Supabase Realtime is enabled for state where freshness matters:
+
+- `vault_files`
+- `vault_folders`
+- `activity_events`
+- `share_links`
+- `product_settings`
+
+The frontend subscribes only to the tables needed by each page. Expensive semantic-search responses are not streamed unnecessarily.
+
+## AI and intelligent retrieval
+
+The hosted product uses Supabase's built-in `gte-small` embedding model and `pgvector`.
+
+Implemented intelligence:
+
+- semantic query embedding
+- permission-aware vector retrieval
+- file-level result deduplication
+- related-file discovery
+- configurable text chunking
+- model metadata on indexed chunks
+- asynchronous indexing after successful upload/version changes
+
+The AI subsystem is retrieval-focused rather than a generic chatbot.
+
+## Local distributed-systems profile
+
+The Docker Compose profile demonstrates a deeper service architecture:
+
+```text
+React
+  |
+Nginx
+  |
+FastAPI
+  |-------- PostgreSQL
+  |-------- MinIO
+  |-------- Elasticsearch
+  |
+RabbitMQ
+  |
+Celery AI worker
+  |
+Redis
+
+Prometheus -> Grafana
+```
+
+It includes:
+
+- FastAPI
+- SQLAlchemy
+- Alembic
 - PostgreSQL
-- Redis
-- RabbitMQ
 - MinIO
+- RabbitMQ
+- Celery
+- Redis
 - Elasticsearch
+- Sentence Transformers
 - Prometheus
 - Grafana
-- Docker Compose
-- GitHub Actions CI definition
-- Pytest and Ruff quality configuration
 
-## Architecture
-
-```text
-                           Browser
-                              |
-                      React + TypeScript
-                              |
-                            Nginx
-                              |
-                           FastAPI
-                _____________|_____________
-               |             |             |
-          PostgreSQL       MinIO       Elasticsearch
-          metadata        objects      hybrid search
-               |             ^             ^
-               |             |             |
-               +------ RabbitMQ -----------+
-                         |
-                    Celery worker
-                         |
-              extraction -> chunking
-                         |
-                 sentence embeddings
-
-                    Redis task backend
-
-             Prometheus -> Grafana
-```
-
-### Upload path
-
-```text
-Client
-  -> FastAPI validates authentication, size, and quota
-  -> object written to MinIO
-  -> metadata committed to PostgreSQL
-  -> indexing task published
-  -> request returns
-
-Celery worker
-  -> downloads object
-  -> extracts supported document text
-  -> chunks content
-  -> generates embeddings in batches
-  -> replaces file chunks in Elasticsearch
-  -> marks file search-ready
-```
-
-AI work is kept outside the synchronous upload request so model latency does not make storage availability depend on embedding generation.
-
-### Search path
-
-```text
-query
-  -> query embedding
-  -> lexical match + vector kNN
-  -> owner_id filter applied to both retrieval paths
-  -> rank candidates
-  -> keep highest-scoring chunk for each file
-  -> return file results
-```
+The API image and AI worker use separate dependency surfaces so the normal API container does not carry the full ML stack.
 
 ## Repository structure
 
@@ -190,11 +189,6 @@ query
 CloudVault/
 ├── backend/
 │   ├── app/
-│   │   ├── api/
-│   │   ├── core/
-│   │   ├── database/
-│   │   ├── services/
-│   │   └── workers/
 │   ├── migrations/
 │   └── tests/
 ├── frontend/
@@ -204,6 +198,7 @@ CloudVault/
 ├── supabase/
 │   ├── functions/
 │   └── migrations/
+├── docs/
 ├── .github/
 │   └── workflows/
 ├── docker-compose.yml
@@ -212,30 +207,23 @@ CloudVault/
 └── README.md
 ```
 
-The structure is deliberately compact. New folders are added only when the implementation needs them.
-
 ## Local development
 
-### Requirements
-
-- Docker Desktop with Docker Compose
-- Enough memory for Elasticsearch and the embedding worker
-
-### Start the platform
+### Full distributed stack
 
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
 
-On Windows PowerShell:
+PowerShell:
 
 ```powershell
 Copy-Item .env.example .env
 docker compose up --build
 ```
 
-Default local services:
+Default services:
 
 | Service | Address |
 | --- | --- |
@@ -247,124 +235,83 @@ Default local services:
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
 
-Change the example secrets before using the stack outside an isolated local environment.
+### Frontend only
 
-## API surface implemented
-
-```text
-GET    /health
-POST   /api/v1/auth/register
-POST   /api/v1/auth/login
-POST   /api/v1/auth/refresh
-GET    /api/v1/files
-GET    /api/v1/files/summary
-POST   /api/v1/files
-PUT    /api/v1/files/{file_id}
-GET    /api/v1/files/{file_id}/versions
-GET    /api/v1/files/{file_id}/download
-DELETE /api/v1/files/{file_id}
-POST   /api/v1/files/{file_id}/restore
-GET    /api/v1/search?q=...
-GET    /metrics
+```bash
+cd frontend
+npm install
+npm run dev
 ```
+
+Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` for another Supabase deployment.
 
 ## Quality gates
 
-The repository contains checks for:
+GitHub Actions validates:
 
-- Python linting and formatting with Ruff
-- Backend unit/API tests with Pytest
-- Backend coverage reporting
-- Frontend TypeScript build
-- Backend and frontend container builds
-- Database migrations instead of implicit schema creation
+- Ruff lint
+- Ruff formatting
+- Pytest backend tests
+- Python compile check
+- backend Docker image build
+- TypeScript/Vite production build
+- frontend Docker image build
 
-GitHub Actions runs backend lint/format/tests/container checks and frontend typecheck/build/container checks. The repository does not invent a passing build or coverage percentage; workflow results are treated as the source of truth.
+The workflow result is the source of truth. This README does not invent a passing build, coverage percentage, or performance benchmark.
+
+## Security decisions
+
+- private Storage bucket
+- owner-based RLS
+- signed object downloads
+- hashed share tokens
+- atomic share-link usage consumption
+- configurable upload limits enforced by Storage and frontend validation
+- file names normalized before object-key generation
+- SHA-256 exact duplicate detection
+- secrets kept outside Git
+- public Supabase publishable keys treated as public client identifiers, never service-role secrets
+
+Supabase may expose additional account-level security controls that are configured outside this repository.
 
 ## Observability
 
-CloudVault exposes Prometheus metrics including:
+The local distributed profile exposes Prometheus metrics for storage, semantic search, and AI indexing. The production Supabase profile also exposes realtime state in the UI rather than inventing synthetic telemetry.
 
-- `cloudvault_file_uploads_total`
-- `cloudvault_file_upload_bytes_total`
-- `cloudvault_semantic_search_requests_total`
-- `cloudvault_semantic_search_duration_seconds`
-- `cloudvault_ai_index_jobs_total`
-- `cloudvault_ai_index_failures_total`
-- `cloudvault_ai_index_duration_seconds`
+## Evaluation and performance
 
-These allow AI indexing to be operated like a real production subsystem instead of an invisible model call.
+Planned performance targets from the original specification are **targets, not achievements**.
 
-## Security decisions already enforced
-
-- Passwords are hashed rather than encrypted or stored in plaintext.
-- File APIs always scope records to the authenticated owner.
-- Elasticsearch retrieval carries the same owner boundary as relational lookups.
-- File names are normalized before generating object keys.
-- Upload limits and quotas are checked server-side.
-- The frontend never receives MinIO credentials.
-- Secrets are represented through environment variables and excluded from Git.
-
-A future security milestone will add refresh-token revocation/rotation, rate limiting, email verification, OAuth, signed sharing links, stricter content validation, and deployment-specific TLS/security headers.
-
-## AI evaluation plan
-
-Semantic retrieval will not be advertised with invented accuracy numbers. Before benchmark claims are added, the project will use a labelled query-to-document relevance set and measure metrics such as:
+Before adding benchmark claims, measure:
 
 - Recall@K
 - Precision@K
-- Mean Reciprocal Rank
+- MRR
 - nDCG
 - p50/p95 search latency
+- indexing latency
 - indexing throughput
-- indexing failure rate
+- failure rate
+- load-test throughput
 
-## Roadmap
+## Remaining optional extensions
 
-The original product specification is broader than the first working milestone. Still to be implemented:
+These are not required for the current product to function:
 
-- Google OAuth 2.0
-- email verification and password reset
-- persisted refresh-token rotation/revocation
-- explicit admin RBAC endpoints
-- folders
-- permanent purge workflow and retention policy
-- private/public sharing links
-- multipart uploads for very large objects
-- Redis response caching and rate limiting
-- activity/audit log
-- storage/download analytics
-- near-duplicate suggestions
-- related-file recommendations
-- retrieval evaluation harness
-- load tests and measured performance targets
-- Grafana dashboard provisioning
-- hardened production deployment and TLS
-- Kubernetes manifests only if the deployment actually needs Kubernetes
+- Google OAuth 2.0 configuration
+- optional Gemini-backed grounded Q&A/summaries with explicit user opt-in
+- multipart/resumable upload for very large files
+- admin/organization management UI
+- automated retrieval benchmark dataset
+- measured Locust load-test report
+- Kubernetes manifests if a future deployment actually needs Kubernetes
 
-## Reference documentation
+## Cost policy
 
-Implementation choices are grounded primarily in official project documentation:
+The hosted architecture targets **$0 recurring subscription cost** using free tiers and open-source software.
 
-- FastAPI: https://fastapi.tiangolo.com/
-- SQLAlchemy: https://docs.sqlalchemy.org/
-- Alembic: https://alembic.sqlalchemy.org/
-- Elasticsearch vector search: https://www.elastic.co/docs/solutions/search/vector
-- Sentence Transformers: https://www.sbert.net/
-- Celery: https://docs.celeryq.dev/
-- MinIO Python SDK: https://min.io/docs/minio/linux/developers/python/minio-py.html
-- Prometheus: https://prometheus.io/docs/
-- OWASP ASVS: https://owasp.org/www-project-application-security-verification-standard/
+Free-tier quotas and provider terms can change. CloudVault should degrade or suspend when a quota is exhausted rather than automatically upgrading to a paid service.
 
 ## Author
 
 **Aditya Mohan Srivastava**
-
-
-## Design direction
-
-CloudVault does not copy another product's visual identity. The interface uses current product-design patterns as references: calm hierarchy and consistent navigation, search-first content access, contextual hover actions, desktop-like responsiveness, and motion that supports orientation rather than decoration.
-
-## Cost policy
-
-The hosted project is intentionally built around free/open-source technologies. No recurring paid subscription is required by the architecture itself. Free-tier providers can change quotas or product terms over time, so the live deployment should be periodically reviewed against current limits before relying on it for production workloads.
