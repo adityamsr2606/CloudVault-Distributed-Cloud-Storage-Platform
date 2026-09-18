@@ -23,24 +23,50 @@ async function sha256(value: string) {
     .join("");
 }
 
-function r2Client() {
-  const accountId = Deno.env.get("R2_ACCOUNT_ID");
-  const accessKeyId = Deno.env.get("R2_ACCESS_KEY_ID");
-  const secretAccessKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
-  const bucket = Deno.env.get("R2_BUCKET");
+function objectStore(provider: string) {
+  if (provider === "b2") {
+    const endpoint = Deno.env.get("B2_S3_ENDPOINT");
+    const region = Deno.env.get("B2_REGION");
+    const accessKeyId = Deno.env.get("B2_APPLICATION_KEY_ID");
+    const secretAccessKey = Deno.env.get("B2_APPLICATION_KEY");
+    const bucket = Deno.env.get("B2_BUCKET");
 
-  if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
-    throw new Error("R2 is not configured on this deployment.");
+    if (!endpoint || !region || !accessKeyId || !secretAccessKey || !bucket) {
+      throw new Error("Backblaze B2 is not configured on this deployment.");
+    }
+
+    return {
+      bucket,
+      client: new S3Client({
+        region,
+        endpoint,
+        forcePathStyle: true,
+        credentials: { accessKeyId, secretAccessKey },
+      }),
+    };
   }
 
-  return {
-    bucket,
-    client: new S3Client({
-      region: "auto",
-      endpoint: "https://" + accountId + ".r2.cloudflarestorage.com",
-      credentials: { accessKeyId, secretAccessKey },
-    }),
-  };
+  if (provider === "r2") {
+    const accountId = Deno.env.get("R2_ACCOUNT_ID");
+    const accessKeyId = Deno.env.get("R2_ACCESS_KEY_ID");
+    const secretAccessKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
+    const bucket = Deno.env.get("R2_BUCKET");
+
+    if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
+      throw new Error("Cloudflare R2 is not configured on this deployment.");
+    }
+
+    return {
+      bucket,
+      client: new S3Client({
+        region: "auto",
+        endpoint: "https://" + accountId + ".r2.cloudflarestorage.com",
+        credentials: { accessKeyId, secretAccessKey },
+      }),
+    };
+  }
+
+  throw new Error("Unsupported large-object provider.");
 }
 
 Deno.serve(async (req: Request) => {
@@ -82,8 +108,8 @@ Deno.serve(async (req: Request) => {
     const seconds = Number(settings.share_signed_url_seconds);
     let signedUrl: string;
 
-    if (file.storage_provider === "r2") {
-      const { client, bucket } = r2Client();
+    if (file.storage_provider !== "supabase") {
+      const { client, bucket } = objectStore(String(file.storage_provider));
       signedUrl = await getSignedUrl(
         client,
         new GetObjectCommand({ Bucket: bucket, Key: file.storage_path }),
