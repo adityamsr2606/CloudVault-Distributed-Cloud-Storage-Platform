@@ -10,7 +10,9 @@ const corsHeaders = {
 async function sha256(value: string) {
   const data = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", data);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 Deno.serve(async (req: Request) => {
@@ -34,13 +36,43 @@ Deno.serve(async (req: Request) => {
     const { data: authData, error: authError } = await supabase.auth.getUser();
     if (authError || !authData.user) throw new Error("Invalid session");
 
-    const { file_id, expires_hours = 24, max_uses = null } = await req.json();
-    const hours = Math.min(Math.max(Number(expires_hours) || 24, 1), 168);
+    const [{ data: settings, error: settingsError }, body] = await Promise.all([
+      supabase
+        .from("product_settings")
+        .select("sharing_enabled,default_share_expiry_hours,max_share_expiry_hours,default_share_max_uses,max_share_uses")
+        .eq("id", "default")
+        .single(),
+      req.json(),
+    ]);
+
+    if (settingsError || !settings) throw settingsError ?? new Error("Missing product settings");
+    if (!settings.sharing_enabled) {
+      return new Response(JSON.stringify({ error: "Sharing is disabled" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const fileId = body.file_id;
+    const requestedHours = Number(body.expires_hours ?? settings.default_share_expiry_hours);
+    const hours = Math.min(
+      Math.max(Number.isFinite(requestedHours) ? requestedHours : settings.default_share_expiry_hours, 1),
+      settings.max_share_expiry_hours,
+    );
+
+    const requestedUses = body.max_uses;
+    const maxUses =
+      requestedUses === null
+        ? null
+        : Math.min(
+            Math.max(Number(requestedUses ?? settings.default_share_max_uses), 1),
+            settings.max_share_uses,
+          );
 
     const { data: file, error: fileError } = await supabase
       .from("vault_files")
       .select("id")
-      .eq("id", file_id)
+      .eq("id", fileId)
       .is("deleted_at", null)
       .single();
 
@@ -51,22 +83,23 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const token = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
+    const token =
+      crypto.randomUUID().replaceAll("-", "") +
+      crypto.randomUUID().replaceAll("-", "");
     const tokenHash = await sha256(token);
     const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
 
     const { data, error } = await supabase
       .from("share_links")
       .insert({
-        file_id,
+        file_id: fileId,
         owner_id: authData.user.id,
         token_hash: tokenHash,
         expires_at: expiresAt,
-        max_uses: max_uses ? Math.min(Math.max(Number(max_uses), 1), 1000) : null,
+        max_uses: maxUses,
       })
       .select("id, expires_at, max_uses")
       .single();
-
     if (error) throw error;
 
     return new Response(JSON.stringify({ ...data, token }), {
