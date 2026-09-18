@@ -45,10 +45,6 @@ type MultipartStatus = MultipartSession & {
   file?: VaultFile;
 };
 
-function legacyUploadKey(file: File) {
-  return "cloudvault-upload:" + file.name + ":" + file.size + ":" + file.lastModified;
-}
-
 function safeJsonParse<T>(value: string | null): T | null {
   if (!value) return null;
   try {
@@ -124,7 +120,8 @@ export class CloudUploadTask {
   private sessionId: string | null = null;
   private paused = false;
   private cancelled = false;
-  private resumeResolver: (() => void) | null = null;
+  private ownerId: string | null = null;
+  private resumeResolvers = new Set<() => void>();
   private activeRequests = new Set<XMLHttpRequest>();
   private partProgress = new Map<number, number>();
   private completedParts = new Map<number, PartRecord>();
@@ -157,8 +154,7 @@ export class CloudUploadTask {
 
     this.paused = false;
     this.state = "uploading";
-    this.resumeResolver?.();
-    this.resumeResolver = null;
+    this.releasePausedWorkers();
     this.emitProgress();
   }
 
@@ -172,8 +168,7 @@ export class CloudUploadTask {
     for (const request of this.activeRequests) request.abort();
     this.activeRequests.clear();
 
-    this.resumeResolver?.();
-    this.resumeResolver = null;
+    this.releasePausedWorkers();
 
     if (this.sessionId) {
       try {
@@ -188,7 +183,12 @@ export class CloudUploadTask {
   }
 
   private storageKey() {
+    if (!this.ownerId) {
+      throw new Error("Cannot persist an upload session without an authenticated owner.");
+    }
+
     const context = [
+      this.ownerId,
       this.replaceFile?.id ?? "new",
       this.folderId ?? "root",
       this.file.name,
@@ -202,25 +202,9 @@ export class CloudUploadTask {
   }
 
   private readStoredSession() {
-    const primaryKey = this.storageKey();
-    const primary = safeJsonParse<{ session_id: string }>(
-      localStorage.getItem(primaryKey),
+    return safeJsonParse<{ session_id: string }>(
+      localStorage.getItem(this.storageKey()),
     );
-
-    if (primary?.session_id) return primary;
-
-    const legacyKey = legacyUploadKey(this.file);
-    const legacy = safeJsonParse<{ session_id: string }>(
-      localStorage.getItem(legacyKey),
-    );
-
-    if (legacy?.session_id) {
-      localStorage.setItem(primaryKey, JSON.stringify(legacy));
-      localStorage.removeItem(legacyKey);
-      return legacy;
-    }
-
-    return null;
   }
 
   private storeSession(sessionId: string) {
@@ -232,7 +216,6 @@ export class CloudUploadTask {
 
   private clearStoredSession() {
     localStorage.removeItem(this.storageKey());
-    localStorage.removeItem(legacyUploadKey(this.file));
   }
 
   private providerEnabled(provider: string) {
@@ -261,7 +244,17 @@ export class CloudUploadTask {
   }
 
   private async run() {
-    this.settings = await getProductSettings();
+    const [settings, auth] = await Promise.all([
+      getProductSettings(),
+      supabase.auth.getUser(),
+    ]);
+
+    this.settings = settings;
+    this.ownerId = auth.data.user?.id ?? null;
+
+    if (auth.error || !this.ownerId) {
+      throw new Error("Your session expired. Sign in again before uploading.");
+    }
 
     if (this.file.size <= 0) throw new Error("Empty files are not accepted.");
 
@@ -334,7 +327,13 @@ export class CloudUploadTask {
           session = null;
           this.sessionId = null;
         }
-      } catch {
+      } catch (error) {
+        const missingSession =
+          error instanceof Error &&
+          error.message.toLowerCase().includes("upload session not found");
+
+        if (!missingSession) throw error;
+
         this.clearStoredSession();
         session = null;
         this.sessionId = null;
@@ -561,12 +560,17 @@ export class CloudUploadTask {
     });
   }
 
-  private async waitUntilResumed() {
-    if (!this.paused) return;
+  private releasePausedWorkers() {
+    for (const resolve of this.resumeResolvers) resolve();
+    this.resumeResolvers.clear();
+  }
 
-    await new Promise<void>((resolve) => {
-      this.resumeResolver = resolve;
-    });
+  private async waitUntilResumed() {
+    while (this.paused && !this.cancelled) {
+      await new Promise<void>((resolve) => {
+        this.resumeResolvers.add(resolve);
+      });
+    }
   }
 
   private emitProgress(forceLoaded?: number) {
