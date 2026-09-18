@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.database.session import get_db
 from app.dependencies import get_current_user
+from app.core.metrics import FILE_UPLOAD_BYTES, FILE_UPLOADS
 from app.models import FileObject, FileStatus, User
 from app.schemas import FileResponse
 from app.services.storage import get_storage_service
@@ -87,6 +88,8 @@ async def upload_file(
         get_storage_service().delete(object_key)
         raise
 
+    FILE_UPLOADS.labels(mime_type=mime_type).inc()
+    FILE_UPLOAD_BYTES.inc(len(data))
     index_file.delay(str(record.id))
     return record
 

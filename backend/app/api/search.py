@@ -1,5 +1,8 @@
+from time import perf_counter
+
 from fastapi import APIRouter, Depends, Query
 
+from app.core.metrics import SEARCH_LATENCY, SEARCH_REQUESTS
 from app.dependencies import get_current_user
 from app.models import User
 from app.schemas import SearchHit
@@ -15,6 +18,7 @@ def search_files(
     limit: int = Query(default=10, ge=1, le=50),
     user: User = Depends(get_current_user),
 ) -> list[SearchHit]:
+    started = perf_counter()
     vector = embed_text(q)
     hits = get_search_service().hybrid_search(
         owner_id=str(user.id),
@@ -38,8 +42,11 @@ def search_files(
                 snippet=(source.get("content") or "")[:220] or None,
             )
 
-    return sorted(
+    results = sorted(
         best_by_file.values(),
         key=lambda item: item.score,
         reverse=True,
     )[:limit]
+    SEARCH_REQUESTS.inc()
+    SEARCH_LATENCY.observe(perf_counter() - started)
+    return results

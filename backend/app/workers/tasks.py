@@ -1,8 +1,10 @@
+from time import perf_counter
 from uuid import UUID
 
 from celery.utils.log import get_task_logger
 
 from app.core.config import get_settings
+from app.core.metrics import AI_INDEX_FAILURES, AI_INDEX_JOBS, AI_INDEX_LATENCY
 from app.database.session import SessionLocal
 from app.models import FileObject, FileStatus
 from app.services.ai import chunk_text, embed_texts, extract_text
@@ -25,6 +27,8 @@ def index_file(self, file_id: str) -> None:
     if file is None or file.deleted_at is not None:
         db.close()
         return
+
+    started = perf_counter()
 
     try:
         file.status = FileStatus.INDEXING
@@ -55,10 +59,14 @@ def index_file(self, file_id: str) -> None:
 
         file.status = FileStatus.READY
         db.commit()
+        AI_INDEX_JOBS.labels(status="success").inc()
     except Exception:
         file.status = FileStatus.FAILED
         db.commit()
+        AI_INDEX_FAILURES.inc()
+        AI_INDEX_JOBS.labels(status="failed").inc()
         logger.exception("Failed to index file %s", file_id)
         raise
     finally:
+        AI_INDEX_LATENCY.observe(perf_counter() - started)
         db.close()
