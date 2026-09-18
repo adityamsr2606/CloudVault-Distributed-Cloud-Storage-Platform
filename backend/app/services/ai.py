@@ -6,9 +6,7 @@ from pypdf import PdfReader
 
 from app.core.config import get_settings
 
-DOCX_MIME_TYPE = (
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-)
+DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 @lru_cache
