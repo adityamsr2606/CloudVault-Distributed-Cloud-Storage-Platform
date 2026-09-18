@@ -6,6 +6,10 @@ from pypdf import PdfReader
 
 from app.core.config import get_settings
 
+DOCX_MIME_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+
 
 @lru_cache
 def get_embedding_model():
@@ -37,11 +41,8 @@ def extract_text(filename: str, mime_type: str, data: bytes) -> str:
         reader = PdfReader(io.BytesIO(data))
         return "\n".join(page.extract_text() or "" for page in reader.pages)
 
-    if (
-        mime_type
-        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        or filename.lower().endswith(".docx")
-    ):
+    is_docx = mime_type == DOCX_MIME_TYPE or filename.lower().endswith(".docx")
+    if is_docx:
         document = Document(io.BytesIO(data))
         return "\n".join(paragraph.text for paragraph in document.paragraphs)
 
