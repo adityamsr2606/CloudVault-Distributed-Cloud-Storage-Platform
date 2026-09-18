@@ -6,6 +6,7 @@ import CloudVaultLogo from "../components/CloudVaultLogo";
 import LiveBackdrop from "../components/LiveBackdrop";
 import ThemeSwitcher from "../components/ThemeSwitcher";
 import { getProductSettings, type ProductSettings } from "../config/product";
+import { passwordPolicyError } from "../lib/passwordPolicy";
 import { supabase } from "../lib/supabase";
 
 export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
@@ -34,6 +35,9 @@ export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
         if (error) throw error;
         navigate("/app");
       } else {
+        const policyError = passwordPolicyError(password);
+        if (policyError) throw new Error(policyError);
+
         const { data, error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
         if (data.session) navigate("/app");
@@ -155,12 +159,16 @@ export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
             Password
             <input
               required
-              minLength={8}
+              minLength={mode === "register" ? 12 : 1}
               autoComplete={mode === "login" ? "current-password" : "new-password"}
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="At least 8 characters"
+              placeholder={
+                mode === "register"
+                  ? "12+ chars, upper/lower/number/symbol"
+                  : "Your password"
+              }
             />
           </label>
 
