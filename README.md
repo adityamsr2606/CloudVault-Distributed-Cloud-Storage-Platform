@@ -25,7 +25,10 @@ The repository is being implemented incrementally. The sections below distinguis
 - SHA-256 content fingerprints
 - Upload-size validation
 - Storage quota enforcement
-- Soft deletion
+- Immutable file-version records
+- File replacement with version history
+- Soft deletion and restore
+- Storage summary endpoint
 - Compensating object deletion when metadata persistence fails
 
 ### AI retrieval
@@ -193,9 +196,13 @@ POST   /api/v1/auth/register
 POST   /api/v1/auth/login
 POST   /api/v1/auth/refresh
 GET    /api/v1/files
+GET    /api/v1/files/summary
 POST   /api/v1/files
+PUT    /api/v1/files/{file_id}
+GET    /api/v1/files/{file_id}/versions
 GET    /api/v1/files/{file_id}/download
 DELETE /api/v1/files/{file_id}
+POST   /api/v1/files/{file_id}/restore
 GET    /api/v1/search?q=...
 GET    /metrics
 ```
@@ -260,8 +267,7 @@ The original product specification is broader than the first working milestone. 
 - persisted refresh-token rotation/revocation
 - explicit admin RBAC endpoints
 - folders
-- file version history
-- restore/purge workflow
+- permanent purge workflow and retention policy
 - private/public sharing links
 - multipart uploads for very large objects
 - Redis response caching and rate limiting

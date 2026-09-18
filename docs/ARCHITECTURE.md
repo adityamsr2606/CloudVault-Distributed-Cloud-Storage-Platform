@@ -18,7 +18,7 @@ Owns synchronous HTTP concerns: authentication, validation, metadata transaction
 
 ### PostgreSQL
 
-Stores authoritative application metadata. A search index is never treated as the source of truth for file ownership or lifecycle state.
+Stores authoritative application metadata, current file state, and immutable version records. A search index is never treated as the source of truth for file ownership or lifecycle state.
 
 ### MinIO
 
@@ -51,7 +51,7 @@ uploaded -> indexing -> ready
                     \-> failed
 ```
 
-The file remains stored even if search indexing fails.
+The file remains stored even if search indexing fails. Replacing a file creates a new object key and a new version record, so older object versions are not overwritten in place.
 
 ## Why this is not split into many microservices
 
