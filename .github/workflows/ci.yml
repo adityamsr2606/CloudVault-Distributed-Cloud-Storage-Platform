@@ -57,5 +57,13 @@ jobs:
       - name: Typecheck and build
         run: npm run build
 
+      - name: Publish tested frontend bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudvault-web-dist
+          path: frontend/dist
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Build frontend image
         run: docker build -t cloudvault-web .
