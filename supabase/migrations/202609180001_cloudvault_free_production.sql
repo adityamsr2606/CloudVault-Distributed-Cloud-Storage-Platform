@@ -412,3 +412,147 @@ $$;
 
 grant execute on function public.related_vault_files(uuid, integer)
 to authenticated;
+
+
+-- Runtime product policy. Buyers/deployments can change behavior without editing React code.
+create table if not exists public.product_settings (
+  id text primary key default 'default' check (id = 'default'),
+  max_upload_bytes bigint not null default 52428800 check (max_upload_bytes > 0),
+  default_share_expiry_hours integer not null default 24
+    check (default_share_expiry_hours between 1 and 720),
+  max_share_expiry_hours integer not null default 168
+    check (max_share_expiry_hours between 1 and 720),
+  default_share_max_uses integer not null default 25
+    check (default_share_max_uses between 1 and 10000),
+  max_share_uses integer not null default 1000
+    check (max_share_uses between 1 and 10000),
+  semantic_search_limit integer not null default 18
+    check (semantic_search_limit between 1 and 50),
+  related_files_limit integer not null default 6
+    check (related_files_limit between 1 and 20),
+  max_indexable_text_bytes integer not null default 2097152
+    check (max_indexable_text_bytes > 0),
+  max_indexable_text_chars integer not null default 160000
+    check (max_indexable_text_chars > 0),
+  ai_enabled boolean not null default true,
+  sharing_enabled boolean not null default true,
+  folders_enabled boolean not null default true,
+  versioning_enabled boolean not null default true,
+  duplicate_detection_enabled boolean not null default true,
+  default_theme text not null default 'system'
+    check (default_theme in ('light','dark','system')),
+  data_region_label text not null default 'Mumbai · ap-south-1',
+  chunk_size_chars integer not null default 1400
+    check (chunk_size_chars between 300 and 8000),
+  chunk_overlap_chars integer not null default 220
+    check (chunk_overlap_chars >= 0 and chunk_overlap_chars < chunk_size_chars),
+  share_signed_url_seconds integer not null default 600
+    check (share_signed_url_seconds between 60 and 3600),
+  updated_at timestamptz not null default now()
+);
+
+insert into public.product_settings(id)
+values ('default')
+on conflict (id) do nothing;
+
+alter table public.product_settings enable row level security;
+
+drop policy if exists "product_settings_read" on public.product_settings;
+create policy "product_settings_read"
+on public.product_settings for select
+to anon, authenticated
+using (true);
+
+revoke insert, update, delete on public.product_settings from anon, authenticated;
+
+create or replace function public.get_product_settings()
+returns public.product_settings
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  select *
+  from public.product_settings
+  where id = 'default';
+$$;
+
+grant execute on function public.get_product_settings() to anon, authenticated;
+
+create or replace function public.sync_cloudvault_bucket_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update storage.buckets
+  set file_size_limit = new.max_upload_bytes
+  where id = 'cloudvault-files';
+  return new;
+end;
+$$;
+
+revoke all on function public.sync_cloudvault_bucket_limit()
+from public, anon, authenticated;
+
+drop trigger if exists sync_cloudvault_bucket_limit_trigger
+on public.product_settings;
+
+create trigger sync_cloudvault_bucket_limit_trigger
+after insert or update of max_upload_bytes on public.product_settings
+for each row execute function public.sync_cloudvault_bucket_limit();
+
+update storage.buckets b
+set file_size_limit = s.max_upload_bytes
+from public.product_settings s
+where b.id = 'cloudvault-files'
+  and s.id = 'default';
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'vault_files'
+  ) then
+    alter publication supabase_realtime add table public.vault_files;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'vault_folders'
+  ) then
+    alter publication supabase_realtime add table public.vault_folders;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'activity_events'
+  ) then
+    alter publication supabase_realtime add table public.activity_events;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'share_links'
+  ) then
+    alter publication supabase_realtime add table public.share_links;
+  end if;
+
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'product_settings'
+  ) then
+    alter publication supabase_realtime add table public.product_settings;
+  end if;
+end $$;
