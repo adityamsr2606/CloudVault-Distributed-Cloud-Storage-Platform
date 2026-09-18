@@ -207,7 +207,9 @@ Deno.serve(async (req: Request) => {
     );
 
     if (action === "sign_parts") {
-      const numbers = Array.isArray(body.part_numbers) ? body.part_numbers.map(Number) : [];
+      const numbers: number[] = Array.isArray(body.part_numbers)
+        ? body.part_numbers.map((value: unknown) => Number(value))
+        : [];
       if (numbers.length === 0 || numbers.length > 8) {
         return json({ error: "Request between 1 and 8 part numbers." }, 400);
       }
@@ -300,13 +302,15 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "complete") {
-      const parts = Array.isArray(body.parts) ? body.parts : [];
+      const parts: Array<Record<string, unknown>> = Array.isArray(body.parts)
+        ? body.parts
+        : [];
       if (parts.length !== totalParts) {
         return json({ error: "Every uploaded part must be supplied before completion." }, 400);
       }
 
-      const completedParts = parts
-        .map((part: Record<string, unknown>) => ({
+      const completedParts: Array<{ PartNumber: number; ETag: string }> = parts
+        .map((part) => ({
           PartNumber: Number(part.part_number),
           ETag: String(part.etag ?? ""),
         }))
