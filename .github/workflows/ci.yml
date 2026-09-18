@@ -62,6 +62,12 @@ jobs:
       - name: Typecheck and build
         run: npm run build
 
+      - name: Install responsive test browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Responsive browser QA
+        run: npm run test:responsive
+
       - name: Publish tested frontend bundle
         uses: actions/upload-artifact@v4
         with:
