@@ -23,6 +23,8 @@ export type VaultFolder = {
   id: string;
   parent_id: string | null;
   name: string;
+  deleted_at: string | null;
+  trash_root_id: string | null;
   created_at: string;
 };
 
@@ -176,6 +178,7 @@ export async function listTrash() {
     .from("vault_files")
     .select("*")
     .not("deleted_at", "is", null)
+    .is("trashed_by_folder_id", null)
     .order("deleted_at", { ascending: false });
 
   if (error) throw error;
@@ -185,7 +188,7 @@ export async function listTrash() {
 export async function listFolders() {
   const { data, error } = await supabase
     .from("vault_folders")
-    .select("id,parent_id,name,created_at")
+    .select("id,parent_id,name,deleted_at,trash_root_id,created_at")
     .is("deleted_at", null)
     .order("name");
 
@@ -201,11 +204,74 @@ export async function createFolder(name: string, parentId: string | null = null)
   const { data, error } = await supabase
     .from("vault_folders")
     .insert({ owner_id: ownerId, parent_id: parentId, name: name.trim() })
-    .select("id,parent_id,name,created_at")
+    .select("id,parent_id,name,deleted_at,trash_root_id,created_at")
     .single();
 
   if (error) throw error;
   return data as VaultFolder;
+}
+
+export async function listTrashFolders() {
+  const { data, error } = await supabase
+    .from("vault_folders")
+    .select("id,parent_id,name,deleted_at,trash_root_id,created_at")
+    .not("deleted_at", "is", null)
+    .not("trash_root_id", "is", null)
+    .order("deleted_at", { ascending: false });
+
+  if (error) throw error;
+
+  return ((data ?? []) as VaultFolder[]).filter(
+    (folder) => folder.trash_root_id === folder.id,
+  );
+}
+
+export async function trashFolder(folderId: string) {
+  const { data, error } = await supabase.rpc("trash_vault_folder", {
+    p_folder_id: folderId,
+  });
+
+  if (error) throw error;
+  const result = Array.isArray(data) ? data[0] : data;
+
+  return {
+    foldersTrashed: Number(result?.folders_trashed ?? 0),
+    filesTrashed: Number(result?.files_trashed ?? 0),
+  };
+}
+
+export async function restoreFolder(folderId: string) {
+  const { data, error } = await supabase.rpc("restore_vault_folder", {
+    p_folder_id: folderId,
+  });
+
+  if (error) throw error;
+  const result = Array.isArray(data) ? data[0] : data;
+
+  return {
+    foldersRestored: Number(result?.folders_restored ?? 0),
+    filesRestored: Number(result?.files_restored ?? 0),
+  };
+}
+
+export async function purgeFolder(folderId: string) {
+  const { data, error } = await supabase.functions.invoke("purge-folder", {
+    body: { folder_id: folderId },
+  });
+
+  if (error) throw error;
+  const payload = data as {
+    ok?: boolean;
+    error?: string;
+    files_deleted?: number;
+    objects_deleted?: number;
+  };
+
+  if (payload.error || !payload.ok) {
+    throw new Error(payload.error ?? "Folder purge failed.");
+  }
+
+  return payload;
 }
 
 export async function uploadVaultFile(file: File, folderId: string | null = null) {
