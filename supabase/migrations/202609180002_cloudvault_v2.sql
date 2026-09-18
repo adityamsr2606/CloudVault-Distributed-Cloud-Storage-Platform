@@ -71,6 +71,14 @@ on public.multipart_uploads(provider, provider_upload_id);
 create index if not exists multipart_uploads_owner_created_idx
 on public.multipart_uploads(owner_id, created_at desc);
 
+create index if not exists multipart_uploads_folder_fk_idx
+on public.multipart_uploads(folder_id)
+where folder_id is not null;
+
+create index if not exists multipart_uploads_replaces_file_fk_idx
+on public.multipart_uploads(replaces_file_id)
+where replaces_file_id is not null;
+
 alter table public.multipart_uploads enable row level security;
 
 drop policy if exists "multipart_uploads_select_own" on public.multipart_uploads;
