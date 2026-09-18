@@ -41,9 +41,20 @@ class FileResponse(BaseModel):
     mime_type: str
     size_bytes: int
     sha256: str
+    version_number: int
     status: str
     ai_category: str | None
     ai_summary: str | None
+    created_at: datetime
+
+
+class FileVersionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    version_number: int
+    mime_type: str
+    size_bytes: int
+    sha256: str
     created_at: datetime
 
 
@@ -52,6 +63,13 @@ class SearchHit(BaseModel):
     name: str
     score: float
     snippet: str | None = None
+
+
+class StorageSummary(BaseModel):
+    used_bytes: int
+    quota_bytes: int
+    file_count: int
+    ready_count: int
 
 
 class HealthResponse(BaseModel):

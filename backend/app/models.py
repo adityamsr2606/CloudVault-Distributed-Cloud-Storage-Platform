@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Index, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.session import Base
@@ -56,6 +56,7 @@ class FileObject(Base):
     mime_type: Mapped[str] = mapped_column(String(255))
     size_bytes: Mapped[int] = mapped_column(BigInteger)
     sha256: Mapped[str] = mapped_column(String(64), index=True)
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[FileStatus] = mapped_column(Enum(FileStatus), default=FileStatus.UPLOADED)
     ai_category: Mapped[str | None] = mapped_column(String(100), nullable=True)
     ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -68,3 +69,28 @@ class FileObject(Base):
     )
 
     owner: Mapped[User] = relationship(back_populates="files", foreign_keys=[owner_id])
+    versions: Mapped[list["FileVersion"]] = relationship(
+        back_populates="file",
+        cascade="all, delete-orphan",
+    )
+
+
+class FileVersion(Base):
+    __tablename__ = "file_versions"
+    __table_args__ = (
+        Index("ix_file_versions_file_version", "file_id", "version_number", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"),
+        index=True,
+    )
+    version_number: Mapped[int] = mapped_column(Integer)
+    object_key: Mapped[str] = mapped_column(String(512), unique=True)
+    mime_type: Mapped[str] = mapped_column(String(255))
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    sha256: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    file: Mapped[FileObject] = relationship(back_populates="versions")

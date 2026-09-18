@@ -47,6 +47,7 @@ def upgrade() -> None:
         sa.Column("mime_type", sa.String(length=255), nullable=False),
         sa.Column("size_bytes", sa.BigInteger(), nullable=False),
         sa.Column("sha256", sa.String(length=64), nullable=False),
+        sa.Column("version_number", sa.Integer(), nullable=False),
         sa.Column("status", file_status, nullable=False),
         sa.Column("ai_category", sa.String(length=100), nullable=True),
         sa.Column("ai_summary", sa.Text(), nullable=True),
@@ -63,8 +64,31 @@ def upgrade() -> None:
     op.create_index("ix_files_owner_parent_name", "files", ["owner_id", "parent_id", "name"])
     op.create_index("ix_files_owner_deleted", "files", ["owner_id", "deleted_at"])
 
+    op.create_table(
+        "file_versions",
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("file_id", sa.Uuid(), nullable=False),
+        sa.Column("version_number", sa.Integer(), nullable=False),
+        sa.Column("object_key", sa.String(length=512), nullable=False),
+        sa.Column("mime_type", sa.String(length=255), nullable=False),
+        sa.Column("size_bytes", sa.BigInteger(), nullable=False),
+        sa.Column("sha256", sa.String(length=64), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.ForeignKeyConstraint(["file_id"], ["files.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("object_key"),
+    )
+    op.create_index("ix_file_versions_file_id", "file_versions", ["file_id"])
+    op.create_index(
+        "ix_file_versions_file_version",
+        "file_versions",
+        ["file_id", "version_number"],
+        unique=True,
+    )
+
 
 def downgrade() -> None:
+    op.drop_table("file_versions")
     op.drop_table("files")
     op.drop_table("users")
     sa.Enum(name="filestatus").drop(op.get_bind(), checkfirst=True)
