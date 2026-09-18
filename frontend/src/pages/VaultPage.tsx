@@ -138,19 +138,17 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
     }
   }
 
-  async function moveCurrentFolderToTrash() {
-    if (!activeFolderRecord) return;
-
+  async function moveFolderToTrash(folder: VaultFolder) {
     const confirmed = window.confirm(
       'Move "' +
-        activeFolderRecord.name +
+        folder.name +
         '" and its active files/subfolders to Trash? You can restore the folder later.',
     );
     if (!confirmed) return;
 
     try {
-      const result = await trashFolder(activeFolderRecord.id);
-      setActiveFolder(null);
+      const result = await trashFolder(folder.id);
+      if (activeFolder === folder.id) setActiveFolder(null);
       await refresh();
       setMessage(
         'Folder moved to Trash with ' +
@@ -186,7 +184,7 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
           {!starredOnly && activeFolderRecord && (
             <button
               className="danger-button compact"
-              onClick={() => void moveCurrentFolderToTrash()}
+              onClick={() => void moveFolderToTrash(activeFolderRecord)}
               disabled={uploadBusy}
             >
               <Trash2 size={15} /> Move folder to Trash
@@ -240,10 +238,24 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
       {!starredOnly && settings?.folders_enabled !== false && visibleFolders.length > 0 && (
         <section className="folder-strip">
           {visibleFolders.map((folder) => (
-            <button className="folder-chip" key={folder.id} onClick={() => setActiveFolder(folder.id)}>
-              <Folder size={16} />
-              <span>{folder.name}</span>
-            </button>
+            <div className="folder-chip-shell" key={folder.id}>
+              <button
+                className="folder-chip folder-open"
+                onClick={() => setActiveFolder(folder.id)}
+              >
+                <Folder size={16} />
+                <span>{folder.name}</span>
+              </button>
+              <button
+                className="folder-trash-button"
+                aria-label={"Move " + folder.name + " to Trash"}
+                title="Move folder to Trash"
+                onClick={() => void moveFolderToTrash(folder)}
+                disabled={uploadBusy}
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
           ))}
         </section>
       )}
