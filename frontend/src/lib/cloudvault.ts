@@ -7,7 +7,7 @@ export type VaultFile = {
   folder_id: string | null;
   name: string;
   storage_path: string;
-  storage_provider: "supabase" | "r2";
+  storage_provider: "supabase" | "r2" | "b2";
   mime_type: string;
   size_bytes: number;
   sha256: string | null;
@@ -32,7 +32,7 @@ export type FileVersion = {
   id: string;
   version_number: number;
   storage_path: string;
-  storage_provider: "supabase" | "r2";
+  storage_provider: "supabase" | "r2" | "b2";
   mime_type: string;
   size_bytes: number;
   sha256: string | null;
