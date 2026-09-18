@@ -13,7 +13,7 @@ export type UploadState =
 
 export type UploadProgress = {
   state: UploadState;
-  provider: "supabase" | "r2";
+  provider: "supabase" | "r2" | "b2";
   loadedBytes: number;
   totalBytes: number;
   percent: number;
@@ -94,7 +94,7 @@ export class CloudUploadTask {
   private partProgress = new Map<number, number>();
   private completedParts = new Map<number, PartRecord>();
   private state: UploadState = "preparing";
-  private provider: "supabase" | "r2" = "supabase";
+  private provider: "supabase" | "r2" | "b2" = "supabase";
   private totalParts = 1;
 
   constructor(
@@ -107,7 +107,7 @@ export class CloudUploadTask {
   }
 
   pause() {
-    if (this.state !== "uploading" || this.provider !== "r2") return;
+    if (this.state !== "uploading" || this.provider === "supabase") return;
     this.paused = true;
     this.state = "paused";
     for (const request of this.activeRequests) request.abort();
@@ -157,11 +157,11 @@ export class CloudUploadTask {
       throw new Error("This deployment accepts files up to " + maxMb + " MB.");
     }
 
-    const useR2 =
+    const useLargeObjectProvider =
       this.file.size > this.settings.large_upload_threshold_bytes ||
-      this.settings.storage_provider === "r2";
+      this.settings.storage_provider !== "supabase";
 
-    if (!useR2) {
+    if (!useLargeObjectProvider) {
       this.provider = "supabase";
       this.state = "uploading";
       this.emitProgress(0);
@@ -175,19 +175,29 @@ export class CloudUploadTask {
       return record;
     }
 
-    if (!this.settings.r2_enabled) {
+    const provider = this.settings.large_upload_provider;
+    const providerEnabled =
+      provider === "b2"
+        ? this.settings.b2_enabled
+        : provider === "r2"
+          ? this.settings.r2_enabled
+          : false;
+
+    if (!providerEnabled || provider === "supabase") {
       const directMb = Math.round(
         this.settings.supabase_direct_upload_max_bytes / 1024 / 1024,
       );
       throw new Error(
-        "Large-file storage is ready for R2 but R2 is not connected yet. " +
+        "Large-file storage is configured for " +
+          (provider === "b2" ? "Backblaze B2" : provider.toUpperCase()) +
+          " but that provider is not connected yet. " +
           "The active Supabase provider currently supports uploads up to " +
           directMb +
           " MB.",
       );
     }
 
-    this.provider = "r2";
+    this.provider = provider;
     return this.runMultipart();
   }
 
@@ -373,7 +383,7 @@ export class CloudUploadTask {
         if (!etag) {
           reject(
             new Error(
-              "R2 did not expose the ETag header. Add ETag to the bucket CORS exposeHeaders list.",
+              "The object store did not expose the ETag header. Add ETag to the bucket CORS exposed headers.",
             ),
           );
           return;
