@@ -1,7 +1,6 @@
 import {
   Activity,
   BrainCircuit,
-  Cloud,
   FolderClosed,
   LayoutDashboard,
   LogOut,
@@ -10,10 +9,14 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { supabase } from "../lib/supabase";
+import CloudVaultLogo from "./CloudVaultLogo";
+import CommandPalette from "./CommandPalette";
 import LiveBackdrop from "./LiveBackdrop";
+import ThemeSwitcher from "./ThemeSwitcher";
 
 const nav = [
   ["/app", "Overview", LayoutDashboard],
@@ -28,6 +31,7 @@ const nav = [
 
 export default function AppShell() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   async function logout() {
     await supabase.auth.signOut();
@@ -37,14 +41,9 @@ export default function AppShell() {
   return (
     <div className="app-frame">
       <LiveBackdrop />
-      <aside className="side-rail glass-panel">
-        <div className="brand-mark">
-          <span className="brand-icon"><Cloud size={18} /></span>
-          <div>
-            <strong>CloudVault</strong>
-            <span>private workspace</span>
-          </div>
-        </div>
+
+      <aside className="side-rail">
+        <CloudVaultLogo />
 
         <nav className="side-nav" aria-label="Primary">
           {nav.map(([to, label, Icon]) => (
@@ -63,17 +62,37 @@ export default function AppShell() {
         <div className="side-footer">
           <div className="privacy-note">
             <span className="privacy-pulse" />
-            RLS protected
+            <span>
+              <strong>Personal vault</strong>
+              <small>Database-isolated workspace</small>
+            </span>
           </div>
           <button className="ghost-button nav-logout" onClick={logout}>
-            <LogOut size={16} /> Sign out
+            <LogOut size={16} /> <span>Sign out</span>
           </button>
         </div>
       </aside>
 
-      <main className="content-stage">
-        <Outlet />
-      </main>
+      <section className="workspace">
+        <header className="workspace-bar">
+          <CommandPalette />
+          <ThemeSwitcher compact />
+        </header>
+
+        <main className="content-stage">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={location.pathname}
+              initial={{ opacity: 0, y: 8, filter: "blur(3px)" }}
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              exit={{ opacity: 0, y: -5, filter: "blur(2px)" }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <Outlet />
+            </motion.div>
+          </AnimatePresence>
+        </main>
+      </section>
     </div>
   );
 }

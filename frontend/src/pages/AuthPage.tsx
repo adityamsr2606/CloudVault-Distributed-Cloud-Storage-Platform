@@ -1,8 +1,10 @@
 import { FormEvent, useState } from "react";
-import { Cloud, KeyRound, ShieldCheck } from "lucide-react";
+import { Fingerprint, KeyRound, LockKeyhole, Search } from "lucide-react";
 import { Navigate, useNavigate } from "react-router-dom";
 
+import CloudVaultLogo from "../components/CloudVaultLogo";
 import LiveBackdrop from "../components/LiveBackdrop";
+import ThemeSwitcher from "../components/ThemeSwitcher";
 import { supabase } from "../lib/supabase";
 
 export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
@@ -38,65 +40,116 @@ export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
     }
   }
 
+  async function resetPassword() {
+    if (!email) {
+      setMessage("Enter your email first.");
+      return;
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setMessage(error ? error.message : "Password reset email sent.");
+  }
+
   return (
     <div className="auth-page">
       <LiveBackdrop />
-      <section className="auth-showcase glass-panel">
-        <div className="brand-mark large">
-          <span className="brand-icon"><Cloud size={20} /></span>
-          <div><strong>CloudVault</strong><span>distributed storage, intelligent retrieval</span></div>
-        </div>
+
+      <div className="auth-theme">
+        <ThemeSwitcher compact />
+      </div>
+
+      <section className="auth-showcase">
+        <CloudVaultLogo />
 
         <div className="auth-copy">
-          <p className="eyebrow">Secure by default · AI where it earns its place</p>
-          <h1>Your private file system, built like a real platform.</h1>
+          <p className="eyebrow">Private cloud storage · personal AI retrieval</p>
+          <h1>Keep the files. Find the meaning.</h1>
           <p>
-            Versioned object storage, RLS-enforced access, expiring share links,
-            activity history, and semantic retrieval—without a paid AI API.
+            CloudVault is a private workspace for your own files: encrypted transport,
+            database-enforced ownership, versioned storage, expiring shares, and semantic
+            search that can only retrieve content your account is allowed to see.
           </p>
         </div>
 
-        <div className="auth-trust-grid">
-          <div><ShieldCheck size={18} /><span>Row-level security</span></div>
-          <div><KeyRound size={18} /><span>Short-lived signed access</span></div>
+        <div className="auth-capabilities">
+          <div>
+            <span><Fingerprint size={17} /></span>
+            <strong>Identity isolated</strong>
+            <small>Every row and object path is scoped to its owner.</small>
+          </div>
+          <div>
+            <span><Search size={17} /></span>
+            <strong>Meaning-aware</strong>
+            <small>Search your own indexed content beyond filenames.</small>
+          </div>
+          <div>
+            <span><LockKeyhole size={17} /></span>
+            <strong>Private sharing</strong>
+            <small>Revocable links resolve to short-lived signed URLs.</small>
+          </div>
         </div>
       </section>
 
-      <section className="auth-card glass-panel">
-        <div>
-          <p className="eyebrow">{mode === "login" ? "Welcome back" : "Create your vault"}</p>
-          <h2>{mode === "login" ? "Sign in" : "Start securely"}</h2>
+      <section className="auth-card">
+        <div className="auth-card-top">
+          <p className="eyebrow">{mode === "login" ? "Private workspace" : "Your own vault"}</p>
+          <h2>{mode === "login" ? "Welcome back" : "Create your CloudVault"}</h2>
+          <p>
+            {mode === "login"
+              ? "Your account opens only your files and activity."
+              : "A new account starts with an empty, isolated workspace."}
+          </p>
         </div>
 
         <form onSubmit={submit} className="auth-form">
-          <label>Email<input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-          <label>Password<input required minLength={8} type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+          <label>
+            Email
+            <input
+              required
+              autoComplete="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="you@example.com"
+            />
+          </label>
+          <label>
+            Password
+            <input
+              required
+              minLength={8}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="At least 8 characters"
+            />
+          </label>
+
           {message && <div className="inline-message">{message}</div>}
-          <button className="primary-button" disabled={busy}>
-            {busy ? "Working…" : mode === "login" ? "Sign in" : "Create account"}
+
+          <button className="primary-button auth-submit" disabled={busy}>
+            {busy ? "Working…" : mode === "login" ? "Open my vault" : "Create private vault"}
           </button>
         </form>
 
-        <button className="text-button" onClick={() => setMode(mode === "login" ? "register" : "login")}>
-          {mode === "login" ? "Need an account? Register" : "Already registered? Sign in"}
-        </button>
-        {mode === "login" && (
-          <button
-            className="text-button"
-            onClick={async () => {
-              if (!email) {
-                setMessage("Enter your email first.");
-                return;
-              }
-              const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: `${window.location.origin}/reset-password`,
-              });
-              setMessage(error ? error.message : "Password reset email sent.");
-            }}
-          >
-            Forgot password?
+        <div className="auth-links">
+          <button className="text-button" onClick={() => setMode(mode === "login" ? "register" : "login")}>
+            {mode === "login" ? "Create an account" : "I already have an account"}
           </button>
-        )}
+          {mode === "login" && (
+            <button className="text-button" onClick={resetPassword}>
+              <KeyRound size={13} /> Forgot password?
+            </button>
+          )}
+        </div>
+
+        <p className="auth-privacy-footnote">
+          CloudVault is personal storage. Other signed-in users cannot browse, search,
+          download, or list your private files.
+        </p>
       </section>
     </div>
   );
