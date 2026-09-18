@@ -2671,6 +2671,14 @@ button.file-glyph {
   border-color: color-mix(in srgb, var(--success) 22%, transparent);
 }
 
+.upload-dock.failed {
+  border-color: color-mix(in srgb, var(--danger) 24%, transparent);
+}
+
+.upload-dock.failed .upload-progress-track span {
+  background: var(--danger);
+}
+
 .upload-dock-head {
   display: flex;
   justify-content: space-between;

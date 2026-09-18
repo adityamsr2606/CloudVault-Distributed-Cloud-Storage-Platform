@@ -266,6 +266,8 @@ export class CloudUploadTask {
 
     const plan = chooseUploadPlan(this.file.size, this.settings);
     this.provider = plan.provider;
+    this.state = "preparing";
+    this.emitProgress(0);
 
     if (plan.mode === "direct") {
       this.state = "uploading";
