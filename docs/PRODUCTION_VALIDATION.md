@@ -101,10 +101,10 @@ Configured product upload ceiling:
 Active hosted-provider state:
 
 - Supabase direct upload ceiling: 50 MB
-- large-upload provider: R2
+- large-upload provider: Backblaze B2
 - `b2_enabled=false`
 
-The multipart engine, provider-aware file lifecycle and R2 Edge Functions are implemented,
+The multipart engine, provider-aware file lifecycle and provider-aware B2/R2 Edge Functions are implemented,
 but no real B2 account credentials/bucket are connected in this environment. Therefore a
 real >=1.5 GiB transfer has **not** been claimed as production-verified.
 
