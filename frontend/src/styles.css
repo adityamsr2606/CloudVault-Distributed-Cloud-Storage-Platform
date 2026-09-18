@@ -3608,6 +3608,10 @@ textarea {
     gap: 4px;
   }
 
+  .workspace-actions .theme-switcher.compact {
+    display: none;
+  }
+
   .content-stage {
     padding-left: 10px;
     padding-right: 10px;
