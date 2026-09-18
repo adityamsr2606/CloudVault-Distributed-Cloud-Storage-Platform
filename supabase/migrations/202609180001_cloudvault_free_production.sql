@@ -113,6 +113,8 @@ create table if not exists public.activity_events (
 
 create index if not exists activity_events_owner_created_idx
   on public.activity_events(owner_id, created_at desc);
+create index if not exists activity_events_file_idx
+  on public.activity_events(file_id) where file_id is not null;
 
 alter table public.vault_folders enable row level security;
 alter table public.vault_files enable row level security;

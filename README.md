@@ -6,6 +6,63 @@ CloudVault is a full-stack storage platform built to explore the engineering pro
 
 The repository is being implemented incrementally. The sections below distinguish what exists in code today from the broader roadmap so the project does not claim features that have not been built or measured.
 
+## Free production deployment
+
+CloudVault has two intentional runtime profiles.
+
+### Public deployment — $0 subscription target
+
+The public web application is designed to stay within free managed tiers:
+
+```text
+Vercel Hobby
+    |
+React + TypeScript + Vite
+    |
+Supabase Free
+    |-- Auth
+    |-- Postgres + RLS
+    |-- Storage
+    |-- pgvector
+    |-- Edge Functions
+    +-- built-in gte-small embeddings
+```
+
+This production profile avoids paid AI APIs and paid vector databases. Semantic retrieval uses Supabase's built-in `gte-small` model and `pgvector`. File objects stay in a private Storage bucket and are served through short-lived signed URLs.
+
+The application intentionally does not require OpenAI, Pinecone, Elasticsearch Cloud, a paid queue, or another subscription to remain functional. If a free-tier quota is exhausted, the expected behavior is service degradation or suspension rather than automatically creating a paid bill.
+
+### Local distributed-systems profile
+
+The Docker Compose stack remains in the repository because it demonstrates a deeper SDE/system-design architecture:
+
+- FastAPI API layer
+- PostgreSQL metadata
+- MinIO object storage
+- RabbitMQ + Celery background processing
+- Redis task results
+- Elasticsearch hybrid search
+- Prometheus + Grafana observability
+
+The two profiles solve different problems: the public profile optimizes for a genuinely free live demo; the local profile demonstrates distributed-system boundaries and operational engineering.
+
+### Production product surface
+
+The public web application now includes:
+
+- Overview dashboard
+- My Vault file browser
+- folders
+- starred files
+- semantic Intelligence search
+- secure expiring share links
+- activity audit trail
+- trash and restore
+- settings/system status
+- responsive mobile navigation
+- animated live background with reduced-motion support
+- contextual hover actions for common file operations
+
 ## Current implementation
 
 ### Identity and access
@@ -144,9 +201,13 @@ CloudVault/
 │   └── src/
 ├── infrastructure/
 │   └── monitoring/
+├── supabase/
+│   ├── functions/
+│   └── migrations/
 ├── .github/
 │   └── workflows/
 ├── docker-compose.yml
+├── vercel.json
 ├── .env.example
 └── README.md
 ```
@@ -218,7 +279,7 @@ The repository contains checks for:
 - Backend and frontend container builds
 - Database migrations instead of implicit schema creation
 
-The GitHub Actions workflow is defined on the implementation branch. CI results should be treated as authoritative only after GitHub reports a completed workflow run; this README does not invent a passing build or coverage percentage.
+GitHub Actions runs backend lint/format/tests/container checks and frontend typecheck/build/container checks. The repository does not invent a passing build or coverage percentage; workflow results are treated as the source of truth.
 
 ## Observability
 
@@ -298,3 +359,12 @@ Implementation choices are grounded primarily in official project documentation:
 ## Author
 
 **Aditya Mohan Srivastava**
+
+
+## Design direction
+
+CloudVault does not copy another product's visual identity. The interface uses current product-design patterns as references: calm hierarchy and consistent navigation, search-first content access, contextual hover actions, desktop-like responsiveness, and motion that supports orientation rather than decoration.
+
+## Cost policy
+
+The hosted project is intentionally built around free/open-source technologies. No recurring paid subscription is required by the architecture itself. Free-tier providers can change quotas or product terms over time, so the live deployment should be periodically reviewed against current limits before relying on it for production workloads.
