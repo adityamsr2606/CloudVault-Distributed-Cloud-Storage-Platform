@@ -1,30 +1,41 @@
 import { Ban, Copy, Share2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { useRealtimeRefresh } from "../hooks/useRealtimeRefresh";
 import { ShareLink, listShareLinks, revokeShareLink } from "../lib/cloudvault";
 
 export default function SharedPage() {
   const [links, setLinks] = useState<ShareLink[]>([]);
   const [message, setMessage] = useState("");
 
-  async function refresh() {
-    try { setLinks(await listShareLinks()); } catch (error) {
+  const refresh = useCallback(async () => {
+    try {
+      setLinks(await listShareLinks());
+    } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not load share links");
     }
-  }
+  }, []);
 
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => { void refresh(); }, [refresh]);
+  useRealtimeRefresh(["share_links"], refresh);
 
   async function revoke(id: string) {
-    try { await revokeShareLink(id); await refresh(); setMessage("Share link revoked."); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "Could not revoke link"); }
+    try {
+      await revokeShareLink(id);
+      setMessage("Share link revoked.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not revoke link");
+    }
   }
 
   return (
     <div className="page-wrap">
-      <header className="page-header"><div><p className="eyebrow">External access</p><h1>Shared</h1><p>Expiring, revocable links with usage counters. Raw tokens are never stored.</p></div><div className="ai-badge"><Share2 size={16}/> signed access</div></header>
+      <header className="page-header">
+        <div><p className="eyebrow">External access</p><h1>Shared</h1><p>Live usage counters, expiry, and revocation state for every public link you created.</p></div>
+        <div className="ai-badge"><Share2 size={16}/> realtime access state</div>
+      </header>
       {message && <div className="inline-message">{message}</div>}
-      <section className="table-card glass-panel">
+      <section className="table-card">
         <div className="file-list">
           {links.map((link) => (
             <div className="file-row" key={link.id}>
