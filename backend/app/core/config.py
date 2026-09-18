@@ -5,7 +5,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_name: str = "CloudVault"
     environment: str = "development"
@@ -28,6 +32,9 @@ class Settings(BaseSettings):
     elasticsearch_url: str = "http://elasticsearch:9200"
     elasticsearch_index: str = "cloudvault-files"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    ai_index_version: str = "v1"
+    chunk_size: int = 1500
+    chunk_overlap: int = 200
 
     max_upload_mb: int = 100
     default_storage_quota_mb: int = 1024
