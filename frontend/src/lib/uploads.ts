@@ -58,9 +58,37 @@ function safeJsonParse<T>(value: string | null): T | null {
   }
 }
 
+async function edgeFunctionErrorMessage(error: unknown) {
+  if (error && typeof error === "object" && "context" in error) {
+    const context = (error as { context?: unknown }).context;
+
+    if (context instanceof Response) {
+      const response = context.clone();
+
+      try {
+        const payload = (await response.json()) as { error?: unknown };
+        if (typeof payload?.error === "string" && payload.error.trim()) {
+          return payload.error.trim();
+        }
+      } catch {
+        try {
+          const text = (await context.clone().text()).trim();
+          if (text) return text.slice(0, 500);
+        } catch {
+          // Fall through to the SDK error below.
+        }
+      }
+    }
+  }
+
+  return error instanceof Error
+    ? error.message
+    : "The multipart upload request failed.";
+}
+
 async function invokeMultipart<T>(body: Record<string, unknown>) {
   const { data, error } = await supabase.functions.invoke("multipart-upload", { body });
-  if (error) throw error;
+  if (error) throw new Error(await edgeFunctionErrorMessage(error));
 
   const payload = data as { error?: string } & T;
   if (payload?.error) throw new Error(payload.error);
