@@ -327,7 +327,13 @@ export class CloudUploadTask {
           session = null;
           this.sessionId = null;
         }
-      } catch {
+      } catch (error) {
+        const missingSession =
+          error instanceof Error &&
+          error.message.toLowerCase().includes("upload session not found");
+
+        if (!missingSession) throw error;
+
         this.clearStoredSession();
         session = null;
         this.sessionId = null;
