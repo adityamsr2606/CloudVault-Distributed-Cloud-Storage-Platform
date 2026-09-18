@@ -158,18 +158,27 @@ Deno.serve(async (req: Request) => {
     }
 
     if (objectPaths.length > 0) {
-      const { client, bucket } = objectStore("b2");
+      const providers = new Map<string, string[]>();
+      for (const item of objects.filter((entry) => entry.storage_provider !== "supabase")) {
+        const provider = String(item.storage_provider);
+        const list = providers.get(provider) ?? [];
+        list.push(String(item.storage_path));
+        providers.set(provider, list);
+      }
 
-      for (const paths of chunk(objectPaths, 1000)) {
-        await client.send(
-          new DeleteObjectsCommand({
-            Bucket: bucket,
-            Delete: {
-              Objects: paths.map((Key) => ({ Key })),
-              Quiet: true,
-            },
-          }),
-        );
+      for (const [provider, providerPaths] of providers) {
+        const { client, bucket } = objectStore(provider);
+        for (const paths of chunk([...new Set(providerPaths)], 1000)) {
+          await client.send(
+            new DeleteObjectsCommand({
+              Bucket: bucket,
+              Delete: {
+                Objects: paths.map((Key) => ({ Key })),
+                Quiet: true,
+              },
+            }),
+          );
+        }
       }
     }
 
