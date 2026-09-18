@@ -101,9 +101,13 @@ export default function SettingsPage() {
           <div>
             <strong>Large-file provider</strong>
             <p>
-              {settings?.r2_enabled
-                ? "Cloudflare R2 ready"
-                : "R2 integration ready · credentials not connected"}
+              {settings?.large_upload_provider === "b2"
+                ? settings.b2_enabled
+                  ? "Backblaze B2 ready"
+                  : "Backblaze B2 integration ready · credentials not connected"
+                : settings?.r2_enabled
+                  ? "Cloudflare R2 ready"
+                  : "Large-object provider not connected"}
             </p>
             <span>
               Supabase direct limit:{" "}
