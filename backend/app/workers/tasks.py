@@ -2,9 +2,10 @@ from uuid import UUID
 
 from celery.utils.log import get_task_logger
 
+from app.core.config import get_settings
 from app.database.session import SessionLocal
 from app.models import FileObject, FileStatus
-from app.services.ai import embed_text, extract_text
+from app.services.ai import chunk_text, embed_texts, extract_text
 from app.services.search import get_search_service
 from app.services.storage import get_storage_service
 from app.workers.celery_app import celery_app
@@ -30,21 +31,26 @@ def index_file(self, file_id: str) -> None:
         db.commit()
 
         data = get_storage_service().download_bytes(file.object_key)
-        text = extract_text(file.name, file.mime_type, data)
-        embedding = embed_text(text[:12000])
+        extracted = extract_text(file.name, file.mime_type, data)
+        chunks = chunk_text(extracted)
+
+        # Files with no extractable body are still searchable by name/type.
+        if not chunks:
+            chunks = [f"{file.name} {file.mime_type}"]
+
+        embeddings = embed_texts(chunks)
+        settings = get_settings()
 
         search = get_search_service()
-        search.ensure_index(dimensions=len(embedding))
-        search.index_document(
-            str(file.id),
-            {
-                "file_id": str(file.id),
-                "owner_id": str(file.owner_id),
-                "name": file.name,
-                "mime_type": file.mime_type,
-                "content": text,
-                "embedding": embedding,
-            },
+        search.ensure_index(dimensions=len(embeddings[0]))
+        search.replace_file_chunks(
+            file_id=str(file.id),
+            owner_id=str(file.owner_id),
+            name=file.name,
+            mime_type=file.mime_type,
+            chunks=chunks,
+            embeddings=embeddings,
+            embedding_model=settings.embedding_model,
         )
 
         file.status = FileStatus.READY

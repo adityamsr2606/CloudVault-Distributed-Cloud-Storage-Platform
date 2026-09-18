@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Any
 
-from elasticsearch import Elasticsearch
+from elasticsearch import Elasticsearch, helpers
 
 from app.core.config import get_settings
 
@@ -25,6 +25,8 @@ class SearchService:
                     "name": {"type": "text"},
                     "content": {"type": "text"},
                     "mime_type": {"type": "keyword"},
+                    "chunk_index": {"type": "integer"},
+                    "embedding_model": {"type": "keyword"},
                     "embedding": {
                         "type": "dense_vector",
                         "dims": dimensions,
@@ -35,13 +37,44 @@ class SearchService:
             },
         )
 
-    def index_document(self, document_id: str, body: dict[str, Any]) -> None:
-        self.client.index(
+    def replace_file_chunks(
+        self,
+        file_id: str,
+        owner_id: str,
+        name: str,
+        mime_type: str,
+        chunks: list[str],
+        embeddings: list[list[float]],
+        embedding_model: str,
+    ) -> None:
+        self.client.delete_by_query(
             index=self.index,
-            id=document_id,
-            document=body,
+            query={"term": {"file_id": file_id}},
+            conflicts="proceed",
             refresh=False,
         )
+
+        actions = []
+        for index, (chunk, embedding) in enumerate(zip(chunks, embeddings, strict=True)):
+            actions.append(
+                {
+                    "_index": self.index,
+                    "_id": f"{file_id}:{index}",
+                    "_source": {
+                        "file_id": file_id,
+                        "owner_id": owner_id,
+                        "name": name,
+                        "mime_type": mime_type,
+                        "chunk_index": index,
+                        "embedding_model": embedding_model,
+                        "content": chunk,
+                        "embedding": embedding,
+                    },
+                }
+            )
+
+        if actions:
+            helpers.bulk(self.client, actions, refresh=False)
 
     def hybrid_search(
         self,
@@ -50,9 +83,10 @@ class SearchService:
         vector: list[float],
         limit: int = 10,
     ) -> list[dict[str, Any]]:
+        candidate_count = max(50, limit * 8)
         response = self.client.search(
             index=self.index,
-            size=limit,
+            size=candidate_count,
             query={
                 "bool": {
                     "should": [
@@ -70,8 +104,8 @@ class SearchService:
             knn={
                 "field": "embedding",
                 "query_vector": vector,
-                "k": limit,
-                "num_candidates": max(50, limit * 5),
+                "k": candidate_count,
+                "num_candidates": max(100, candidate_count * 2),
                 "filter": {"term": {"owner_id": owner_id}},
             },
         )

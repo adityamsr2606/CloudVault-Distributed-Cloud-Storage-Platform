@@ -23,12 +23,23 @@ def search_files(
         limit=limit,
     )
 
-    return [
-        SearchHit(
-            file_id=hit["_source"]["file_id"],
-            name=hit["_source"]["name"],
-            score=float(hit["_score"] or 0),
-            snippet=(hit["_source"].get("content") or "")[:220] or None,
-        )
-        for hit in hits
-    ]
+    best_by_file: dict[str, SearchHit] = {}
+    for hit in hits:
+        source = hit["_source"]
+        file_id = source["file_id"]
+        score = float(hit["_score"] or 0)
+        current = best_by_file.get(file_id)
+
+        if current is None or score > current.score:
+            best_by_file[file_id] = SearchHit(
+                file_id=file_id,
+                name=source["name"],
+                score=score,
+                snippet=(source.get("content") or "")[:220] or None,
+            )
+
+    return sorted(
+        best_by_file.values(),
+        key=lambda item: item.score,
+        reverse=True,
+    )[:limit]
