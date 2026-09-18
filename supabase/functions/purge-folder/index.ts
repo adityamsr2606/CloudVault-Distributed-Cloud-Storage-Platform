@@ -22,24 +22,50 @@ function chunk<T>(items: T[], size: number) {
   return batches;
 }
 
-function r2Client() {
-  const accountId = Deno.env.get("R2_ACCOUNT_ID");
-  const accessKeyId = Deno.env.get("R2_ACCESS_KEY_ID");
-  const secretAccessKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
-  const bucket = Deno.env.get("R2_BUCKET");
+function objectStore(provider: string) {
+  if (provider === "b2") {
+    const endpoint = Deno.env.get("B2_S3_ENDPOINT");
+    const region = Deno.env.get("B2_REGION");
+    const accessKeyId = Deno.env.get("B2_APPLICATION_KEY_ID");
+    const secretAccessKey = Deno.env.get("B2_APPLICATION_KEY");
+    const bucket = Deno.env.get("B2_BUCKET");
 
-  if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
-    throw new Error("R2 is not configured on this deployment.");
+    if (!endpoint || !region || !accessKeyId || !secretAccessKey || !bucket) {
+      throw new Error("Backblaze B2 is not configured on this deployment.");
+    }
+
+    return {
+      bucket,
+      client: new S3Client({
+        region,
+        endpoint,
+        forcePathStyle: true,
+        credentials: { accessKeyId, secretAccessKey },
+      }),
+    };
   }
 
-  return {
-    bucket,
-    client: new S3Client({
-      region: "auto",
-      endpoint: "https://" + accountId + ".r2.cloudflarestorage.com",
-      credentials: { accessKeyId, secretAccessKey },
-    }),
-  };
+  if (provider === "r2") {
+    const accountId = Deno.env.get("R2_ACCOUNT_ID");
+    const accessKeyId = Deno.env.get("R2_ACCESS_KEY_ID");
+    const secretAccessKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
+    const bucket = Deno.env.get("R2_BUCKET");
+
+    if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
+      throw new Error("Cloudflare R2 is not configured on this deployment.");
+    }
+
+    return {
+      bucket,
+      client: new S3Client({
+        region: "auto",
+        endpoint: "https://" + accountId + ".r2.cloudflarestorage.com",
+        credentials: { accessKeyId, secretAccessKey },
+      }),
+    };
+  }
+
+  throw new Error("Unsupported large-object provider.");
 }
 
 Deno.serve(async (req: Request) => {
@@ -111,15 +137,15 @@ Deno.serve(async (req: Request) => {
     const supabasePaths = [
       ...new Set(
         objects
-          .filter((item) => item.storage_provider !== "r2")
+          .filter((item) => item.storage_provider === "supabase")
           .map((item) => item.storage_path),
       ),
     ];
 
-    const r2Paths = [
+    const objectPaths = [
       ...new Set(
         objects
-          .filter((item) => item.storage_provider === "r2")
+          .filter((item) => item.storage_provider !== "supabase")
           .map((item) => item.storage_path),
       ),
     ];
@@ -131,10 +157,10 @@ Deno.serve(async (req: Request) => {
       if (error) throw error;
     }
 
-    if (r2Paths.length > 0) {
-      const { client, bucket } = r2Client();
+    if (objectPaths.length > 0) {
+      const { client, bucket } = objectStore("b2");
 
-      for (const paths of chunk(r2Paths, 1000)) {
+      for (const paths of chunk(objectPaths, 1000)) {
         await client.send(
           new DeleteObjectsCommand({
             Bucket: bucket,
@@ -180,7 +206,7 @@ Deno.serve(async (req: Request) => {
     return json({
       ok: true,
       files_deleted: fileIds.length,
-      objects_deleted: supabasePaths.length + r2Paths.length,
+      objects_deleted: supabasePaths.length + objectPaths.length,
     });
   } catch (error) {
     console.error("purge-folder failed", error);
