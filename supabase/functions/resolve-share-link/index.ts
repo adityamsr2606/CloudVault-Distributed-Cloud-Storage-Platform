@@ -29,34 +29,17 @@ Deno.serve(async (req: Request) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
+
     const tokenHash = await sha256(token);
+    const { data: consumed, error: consumeError } = await admin.rpc("consume_share_link", {
+      p_token_hash: tokenHash,
+    });
 
-    const { data: link, error: linkError } = await admin
-      .from("share_links")
-      .select("id, file_id, expires_at, max_uses, use_count, revoked_at")
-      .eq("token_hash", tokenHash)
-      .single();
+    if (consumeError) throw consumeError;
+    const file = consumed?.[0];
 
-    if (
-      linkError || !link ||
-      link.revoked_at ||
-      new Date(link.expires_at).getTime() <= Date.now() ||
-      (link.max_uses !== null && link.use_count >= link.max_uses)
-    ) {
+    if (!file) {
       return new Response(JSON.stringify({ error: "Share link is invalid or expired" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const { data: file, error: fileError } = await admin
-      .from("vault_files")
-      .select("name, storage_path, mime_type, size_bytes, deleted_at")
-      .eq("id", link.file_id)
-      .single();
-
-    if (fileError || !file || file.deleted_at) {
-      return new Response(JSON.stringify({ error: "Shared file is unavailable" }), {
         status: 404,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -68,13 +51,8 @@ Deno.serve(async (req: Request) => {
 
     if (signedError) throw signedError;
 
-    await admin
-      .from("share_links")
-      .update({ use_count: link.use_count + 1 })
-      .eq("id", link.id);
-
     return new Response(JSON.stringify({
-      name: file.name,
+      name: file.file_name,
       mime_type: file.mime_type,
       size_bytes: file.size_bytes,
       signed_url: signed.signedUrl,

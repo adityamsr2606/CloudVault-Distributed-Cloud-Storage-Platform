@@ -306,3 +306,61 @@ drop trigger if exists vault_file_activity_trigger on public.vault_files;
 create trigger vault_file_activity_trigger
 after insert or update on public.vault_files
 for each row execute function public.log_vault_file_activity();
+
+
+create or replace function public.consume_share_link(p_token_hash text)
+returns table (
+  file_id uuid,
+  file_name text,
+  storage_path text,
+  mime_type text,
+  size_bytes bigint
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_link public.share_links%rowtype;
+  v_file public.vault_files%rowtype;
+begin
+  select *
+  into v_link
+  from public.share_links
+  where token_hash = p_token_hash
+  for update;
+
+  if not found
+     or v_link.revoked_at is not null
+     or v_link.expires_at <= now()
+     or (v_link.max_uses is not null and v_link.use_count >= v_link.max_uses)
+  then
+    return;
+  end if;
+
+  select *
+  into v_file
+  from public.vault_files
+  where id = v_link.file_id
+    and deleted_at is null;
+
+  if not found then
+    return;
+  end if;
+
+  update public.share_links
+  set use_count = use_count + 1
+  where id = v_link.id;
+
+  return query
+  select
+    v_file.id,
+    v_file.name,
+    v_file.storage_path,
+    v_file.mime_type,
+    v_file.size_bytes;
+end;
+$$;
+
+revoke all on function public.consume_share_link(text) from public, anon, authenticated;
+grant execute on function public.consume_share_link(text) to service_role;
