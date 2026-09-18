@@ -4,13 +4,14 @@ from prometheus_client import make_asgi_app
 
 from app.api.router import api_router
 from app.core.config import get_settings
+from app.core.observability import install_observability
 from app.schemas import HealthResponse
 
 settings = get_settings()
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.1.0",
+    version="0.2.0",
     docs_url="/docs" if settings.environment != "production" else None,
     redoc_url=None,
 )
@@ -20,9 +21,11 @@ app.add_middleware(
     allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE", "PATCH"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
 )
 
+install_observability(app, settings)
 app.include_router(api_router, prefix=settings.api_prefix)
 app.mount("/metrics", make_asgi_app())
 

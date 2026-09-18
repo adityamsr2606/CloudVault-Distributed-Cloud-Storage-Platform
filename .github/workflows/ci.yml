@@ -32,8 +32,10 @@ jobs:
       - name: Tests
         run: pytest --cov=app --cov-report=term-missing
 
-      - name: Compile application
-        run: python -m compileall -q app
+      - name: Compile application and engineering tools
+        run: |
+          python -m compileall -q app
+          python -m py_compile ../evaluation/retrieval/evaluate.py ../loadtests/locustfile.py
 
       - name: Build backend image
         run: docker build -t cloudvault-api .
@@ -54,6 +56,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Security audit
+        run: npm audit --audit-level=high
+
       - name: Typecheck and build
         run: npm run build
 
@@ -67,3 +72,25 @@ jobs:
 
       - name: Build frontend image
         run: docker build -t cloudvault-web .
+
+
+  edge-functions:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Typecheck CloudVault v2 Edge Functions
+        run: |
+          deno check supabase/functions/multipart-upload/index.ts
+          deno check supabase/functions/object-url/index.ts
+          deno check supabase/functions/purge-file/index.ts
+          deno check supabase/functions/purge-folder/index.ts
+          deno check supabase/functions/restore-version/index.ts
+          deno check supabase/functions/semantic-search/index.ts
+          deno check supabase/functions/grounded-answer/index.ts
+          deno check supabase/functions/resolve-share-link/index.ts

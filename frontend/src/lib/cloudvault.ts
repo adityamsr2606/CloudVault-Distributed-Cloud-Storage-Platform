@@ -7,6 +7,7 @@ export type VaultFile = {
   folder_id: string | null;
   name: string;
   storage_path: string;
+  storage_provider: "supabase" | "r2";
   mime_type: string;
   size_bytes: number;
   sha256: string | null;
@@ -22,6 +23,8 @@ export type VaultFolder = {
   id: string;
   parent_id: string | null;
   name: string;
+  deleted_at: string | null;
+  trash_root_id: string | null;
   created_at: string;
 };
 
@@ -29,6 +32,7 @@ export type FileVersion = {
   id: string;
   version_number: number;
   storage_path: string;
+  storage_provider: "supabase" | "r2";
   mime_type: string;
   size_bytes: number;
   sha256: string | null;
@@ -48,6 +52,31 @@ export type SearchResult = {
   name: string;
   content: string;
   similarity: number;
+  semantic_score?: number;
+  lexical_score?: number;
+  score?: number;
+};
+
+export type GroundedEvidence = {
+  file_id: string;
+  name: string;
+  content: string;
+  semantic_score: number;
+  lexical_score: number;
+  score: number;
+};
+
+export type GroundedAnswer = {
+  status:
+    | "success"
+    | "generative_ai_disabled"
+    | "user_consent_required"
+    | "provider_not_configured"
+    | "provider_unavailable";
+  answer: string | null;
+  evidence: GroundedEvidence[];
+  model?: string;
+  request_id?: string;
 };
 
 export type RelatedFile = {
@@ -149,6 +178,7 @@ export async function listTrash() {
     .from("vault_files")
     .select("*")
     .not("deleted_at", "is", null)
+    .is("trashed_by_folder_id", null)
     .order("deleted_at", { ascending: false });
 
   if (error) throw error;
@@ -158,7 +188,7 @@ export async function listTrash() {
 export async function listFolders() {
   const { data, error } = await supabase
     .from("vault_folders")
-    .select("id,parent_id,name,created_at")
+    .select("id,parent_id,name,deleted_at,trash_root_id,created_at")
     .is("deleted_at", null)
     .order("name");
 
@@ -174,11 +204,74 @@ export async function createFolder(name: string, parentId: string | null = null)
   const { data, error } = await supabase
     .from("vault_folders")
     .insert({ owner_id: ownerId, parent_id: parentId, name: name.trim() })
-    .select("id,parent_id,name,created_at")
+    .select("id,parent_id,name,deleted_at,trash_root_id,created_at")
     .single();
 
   if (error) throw error;
   return data as VaultFolder;
+}
+
+export async function listTrashFolders() {
+  const { data, error } = await supabase
+    .from("vault_folders")
+    .select("id,parent_id,name,deleted_at,trash_root_id,created_at")
+    .not("deleted_at", "is", null)
+    .not("trash_root_id", "is", null)
+    .order("deleted_at", { ascending: false });
+
+  if (error) throw error;
+
+  return ((data ?? []) as VaultFolder[]).filter(
+    (folder) => folder.trash_root_id === folder.id,
+  );
+}
+
+export async function trashFolder(folderId: string) {
+  const { data, error } = await supabase.rpc("trash_vault_folder", {
+    p_folder_id: folderId,
+  });
+
+  if (error) throw error;
+  const result = Array.isArray(data) ? data[0] : data;
+
+  return {
+    foldersTrashed: Number(result?.folders_trashed ?? 0),
+    filesTrashed: Number(result?.files_trashed ?? 0),
+  };
+}
+
+export async function restoreFolder(folderId: string) {
+  const { data, error } = await supabase.rpc("restore_vault_folder", {
+    p_folder_id: folderId,
+  });
+
+  if (error) throw error;
+  const result = Array.isArray(data) ? data[0] : data;
+
+  return {
+    foldersRestored: Number(result?.folders_restored ?? 0),
+    filesRestored: Number(result?.files_restored ?? 0),
+  };
+}
+
+export async function purgeFolder(folderId: string) {
+  const { data, error } = await supabase.functions.invoke("purge-folder", {
+    body: { folder_id: folderId },
+  });
+
+  if (error) throw error;
+  const payload = data as {
+    ok?: boolean;
+    error?: string;
+    files_deleted?: number;
+    objects_deleted?: number;
+  };
+
+  if (payload.error || !payload.ok) {
+    throw new Error(payload.error ?? "Folder purge failed.");
+  }
+
+  return payload;
 }
 
 export async function uploadVaultFile(file: File, folderId: string | null = null) {
@@ -307,7 +400,7 @@ export async function listFileVersions(fileId: string) {
 
   const { data, error } = await supabase
     .from("file_versions")
-    .select("id,version_number,storage_path,mime_type,size_bytes,sha256,created_at")
+    .select("id,version_number,storage_path,storage_provider,mime_type,size_bytes,sha256,created_at")
     .eq("file_id", fileId)
     .order("version_number", { ascending: false });
 
@@ -316,71 +409,35 @@ export async function listFileVersions(fileId: string) {
 }
 
 export async function getVersionDownloadUrl(version: FileVersion) {
-  const settings = await getProductSettings();
-  const { data, error } = await supabase.storage
-    .from("cloudvault-files")
-    .createSignedUrl(version.storage_path, settings.share_signed_url_seconds);
+  const { data, error } = await supabase.functions.invoke("object-url", {
+    body: {
+      storage_path: version.storage_path,
+      storage_provider: version.storage_provider,
+    },
+  });
 
   if (error) throw error;
-  return data.signedUrl;
+  const payload = data as { signed_url?: string; error?: string };
+  if (payload.error || !payload.signed_url) {
+    throw new Error(payload.error ?? "Could not create download URL.");
+  }
+  return payload.signed_url;
 }
 
 export async function restoreFileVersion(current: VaultFile, version: FileVersion) {
-  const settings = await getProductSettings();
-  if (!settings.versioning_enabled) throw new Error("Versioning is disabled.");
-
-  const ownerId = await currentUserId();
-  const nextVersion = current.current_version + 1;
-  const name = safeName(current.name);
-  const nextPath = `${ownerId}/${current.id}/v${nextVersion}/${name}`;
-
-  const { error: copyError } = await supabase.storage
-    .from("cloudvault-files")
-    .copy(version.storage_path, nextPath);
-  if (copyError) throw copyError;
-
-  const { error: versionError } = await supabase.from("file_versions").insert({
-    file_id: current.id,
-    owner_id: ownerId,
-    version_number: nextVersion,
-    storage_path: nextPath,
-    mime_type: version.mime_type,
-    size_bytes: version.size_bytes,
-    sha256: version.sha256,
+  const { data, error } = await supabase.functions.invoke("restore-version", {
+    body: {
+      file_id: current.id,
+      version_id: version.id,
+    },
   });
 
-  if (versionError) {
-    await supabase.storage.from("cloudvault-files").remove([nextPath]);
-    throw versionError;
+  if (error) throw error;
+  const payload = data as { file?: VaultFile; error?: string };
+  if (payload.error || !payload.file) {
+    throw new Error(payload.error ?? "Could not restore version.");
   }
-
-  const { data: updated, error: updateError } = await supabase
-    .from("vault_files")
-    .update({
-      storage_path: nextPath,
-      mime_type: version.mime_type,
-      size_bytes: version.size_bytes,
-      sha256: version.sha256,
-      current_version: nextVersion,
-      status: settings.ai_enabled ? "uploaded" : "ready",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", current.id)
-    .select("*")
-    .single();
-
-  if (updateError) throw updateError;
-
-  if (settings.ai_enabled) {
-    const { data: blob } = await supabase.storage.from("cloudvault-files").download(nextPath);
-    if (blob) {
-      const restored = new File([blob], name, { type: version.mime_type });
-      const text = await indexableText(restored);
-      void supabase.functions.invoke("index-file", { body: { file_id: current.id, text } });
-    }
-  }
-
-  return updated as VaultFile;
+  return payload.file;
 }
 
 export async function toggleStar(file: VaultFile) {
@@ -404,53 +461,42 @@ export async function softDelete(fileId: string) {
 }
 
 export async function restoreFile(fileId: string) {
-  const settings = await getProductSettings();
-  const { error } = await supabase
-    .from("vault_files")
-    .update({
-      status: settings.ai_enabled ? "uploaded" : "ready",
-      deleted_at: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", fileId);
+  const { data, error } = await supabase.rpc("restore_vault_file", {
+    p_file_id: fileId,
+  });
+
   if (error) throw error;
+  if (!data) throw new Error("Could not restore file.");
+  return data as VaultFile;
 }
 
 export async function purgeFile(fileId: string) {
-  const [{ data: versions, error: versionsError }, { data: current, error: currentError }] =
-    await Promise.all([
-      supabase.from("file_versions").select("storage_path").eq("file_id", fileId),
-      supabase.from("vault_files").select("storage_path").eq("id", fileId).single(),
-    ]);
+  const { data, error } = await supabase.functions.invoke("purge-file", {
+    body: { file_id: fileId },
+  });
 
-  if (versionsError) throw versionsError;
-  if (currentError) throw currentError;
-
-  const paths = [
-    ...new Set([
-      current.storage_path,
-      ...(versions ?? []).map((version) => version.storage_path),
-    ]),
-  ];
-
-  if (paths.length > 0) {
-    const { error: storageError } = await supabase.storage
-      .from("cloudvault-files")
-      .remove(paths);
-    if (storageError) throw storageError;
-  }
-
-  const { error } = await supabase.from("vault_files").delete().eq("id", fileId);
   if (error) throw error;
+  const payload = data as { ok?: boolean; error?: string };
+  if (payload.error || !payload.ok) {
+    throw new Error(payload.error ?? "Permanent delete failed.");
+  }
 }
 
 export async function getDownloadUrl(file: VaultFile) {
-  const settings = await getProductSettings();
-  const { data, error } = await supabase.storage
-    .from("cloudvault-files")
-    .createSignedUrl(file.storage_path, settings.share_signed_url_seconds);
+  const { data, error } = await supabase.functions.invoke("object-url", {
+    body: {
+      file_id: file.id,
+      storage_path: file.storage_path,
+      storage_provider: file.storage_provider,
+    },
+  });
+
   if (error) throw error;
-  return data.signedUrl;
+  const payload = data as { signed_url?: string; error?: string };
+  if (payload.error || !payload.signed_url) {
+    throw new Error(payload.error ?? "Could not create download URL.");
+  }
+  return payload.signed_url;
 }
 
 export async function relatedFiles(fileId: string) {
@@ -542,4 +588,56 @@ export async function resolveShareLink(token: string) {
     signed_url: string;
     expires_in_seconds: number;
   };
+}
+
+
+export async function getExternalAiConsent() {
+  const ownerId = await currentUserId();
+  const { data, error } = await supabase
+    .from("user_preferences")
+    .select("allow_external_ai")
+    .eq("owner_id", ownerId)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  if (!data) {
+    const { data: created, error: createError } = await supabase
+      .from("user_preferences")
+      .insert({ owner_id: ownerId, allow_external_ai: false })
+      .select("allow_external_ai")
+      .single();
+
+    if (createError) throw createError;
+    return Boolean(created.allow_external_ai);
+  }
+
+  return Boolean(data.allow_external_ai);
+}
+
+export async function setExternalAiConsent(allowed: boolean) {
+  const ownerId = await currentUserId();
+  const { error } = await supabase
+    .from("user_preferences")
+    .upsert(
+      {
+        owner_id: ownerId,
+        allow_external_ai: allowed,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "owner_id" },
+    );
+
+  if (error) throw error;
+}
+
+export async function askGroundedQuestion(question: string) {
+  const { data, error } = await supabase.functions.invoke("grounded-answer", {
+    body: { question },
+  });
+
+  if (error) throw error;
+  const payload = data as GroundedAnswer & { error?: string };
+  if (payload.error) throw new Error(payload.error);
+  return payload;
 }

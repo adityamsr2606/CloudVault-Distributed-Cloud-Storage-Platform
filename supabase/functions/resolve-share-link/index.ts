@@ -1,11 +1,19 @@
-
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "npm:@supabase/supabase-js@2.116.0";
+import { GetObjectCommand, S3Client } from "npm:@aws-sdk/client-s3@3.888.0";
+import { getSignedUrl } from "npm:@aws-sdk/s3-request-presigner@3.888.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "content-type",
 };
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
 
 async function sha256(value: string) {
   const data = new TextEncoder().encode(value);
@@ -15,16 +23,33 @@ async function sha256(value: string) {
     .join("");
 }
 
+function r2Client() {
+  const accountId = Deno.env.get("R2_ACCOUNT_ID");
+  const accessKeyId = Deno.env.get("R2_ACCESS_KEY_ID");
+  const secretAccessKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
+  const bucket = Deno.env.get("R2_BUCKET");
+
+  if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
+    throw new Error("R2 is not configured on this deployment.");
+  }
+
+  return {
+    bucket,
+    client: new S3Client({
+      region: "auto",
+      endpoint: "https://" + accountId + ".r2.cloudflarestorage.com",
+      credentials: { accessKeyId, secretAccessKey },
+    }),
+  };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
     const { token } = await req.json();
     if (!token || typeof token !== "string") {
-      return new Response(JSON.stringify({ error: "Missing share token" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ error: "Missing share token" }, 400);
     }
 
     const admin = createClient(
@@ -40,10 +65,7 @@ Deno.serve(async (req: Request) => {
 
     if (settingsError || !settings) throw settingsError ?? new Error("Missing product settings");
     if (!settings.sharing_enabled) {
-      return new Response(JSON.stringify({ error: "Shared access is unavailable" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ error: "Shared access is unavailable" }, 404);
     }
 
     const tokenHash = await sha256(token);
@@ -54,33 +76,36 @@ Deno.serve(async (req: Request) => {
 
     const file = consumed?.[0];
     if (!file) {
-      return new Response(JSON.stringify({ error: "Share link is invalid or expired" }), {
-        status: 404,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ error: "Share link is invalid or expired" }, 404);
     }
 
-    const seconds = settings.share_signed_url_seconds;
-    const { data: signed, error: signedError } = await admin.storage
-      .from("cloudvault-files")
-      .createSignedUrl(file.storage_path, seconds);
-    if (signedError) throw signedError;
+    const seconds = Number(settings.share_signed_url_seconds);
+    let signedUrl: string;
 
-    return new Response(
-      JSON.stringify({
-        name: file.file_name,
-        mime_type: file.mime_type,
-        size_bytes: file.size_bytes,
-        signed_url: signed.signedUrl,
-        expires_in_seconds: seconds,
-      }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    if (file.storage_provider === "r2") {
+      const { client, bucket } = r2Client();
+      signedUrl = await getSignedUrl(
+        client,
+        new GetObjectCommand({ Bucket: bucket, Key: file.storage_path }),
+        { expiresIn: seconds },
+      );
+    } else {
+      const { data: signed, error: signedError } = await admin.storage
+        .from("cloudvault-files")
+        .createSignedUrl(file.storage_path, seconds);
+      if (signedError) throw signedError;
+      signedUrl = signed.signedUrl;
+    }
+
+    return json({
+      name: file.file_name,
+      mime_type: file.mime_type,
+      size_bytes: file.size_bytes,
+      signed_url: signedUrl,
+      expires_in_seconds: seconds,
+    });
   } catch (error) {
     console.error("resolve-share-link failed", error);
-    return new Response(JSON.stringify({ error: "Could not resolve share link" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ error: "Could not resolve share link" }, 500);
   }
 });

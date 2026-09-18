@@ -11,6 +11,9 @@ const labels: Record<string, string> = {
   file_versioned: "New version",
   file_starred: "Starred",
   file_unstarred: "Unstarred",
+  folder_deleted: "Folder moved to trash",
+  folder_restored: "Folder restored",
+  folder_purged: "Folder permanently deleted",
 };
 
 export default function ActivityPage() {

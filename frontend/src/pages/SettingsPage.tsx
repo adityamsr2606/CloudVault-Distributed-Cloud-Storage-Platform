@@ -1,18 +1,28 @@
-import { BrainCircuit, Database, Fingerprint, Gauge, Palette, Share2 } from "lucide-react";
+import {
+  BrainCircuit,
+  Cloud,
+  Database,
+  Fingerprint,
+  Gauge,
+  Palette,
+  Share2,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import SecurityPanel from "../components/SecurityPanel";
 import ThemeSwitcher from "../components/ThemeSwitcher";
-import { getProductSettings, type ProductSettings } from "../config/product";
+import {
+  formatCapacity,
+  getProductSettings,
+  type ProductSettings,
+} from "../config/product";
 import { useRealtimeRefresh } from "../hooks/useRealtimeRefresh";
 import { supabase } from "../lib/supabase";
-
-function mb(bytes: number) {
-  return `${Math.round(bytes / 1024 / 1024)} MB`;
-}
 
 export default function SettingsPage() {
   const [email, setEmail] = useState("");
   const [settings, setSettings] = useState<ProductSettings | null>(null);
+  const [message, setMessage] = useState("");
 
   const refresh = useCallback(async () => {
     const [user, product] = await Promise.all([
@@ -23,7 +33,12 @@ export default function SettingsPage() {
     setSettings(product);
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh().catch((error) => {
+      setMessage(error instanceof Error ? error.message : "Could not load settings");
+    });
+  }, [refresh]);
+
   useRealtimeRefresh(["product_settings"], refresh);
 
   return (
@@ -32,48 +47,113 @@ export default function SettingsPage() {
         <div>
           <p className="eyebrow">Live workspace configuration</p>
           <h1>Settings</h1>
-          <p>Appearance, identity boundary, feature policy, and deployment limits.</p>
+          <p>
+            Appearance, identity security, storage-provider policy, retrieval controls and
+            privacy boundaries.
+          </p>
         </div>
       </header>
+
+      {message && <div className="inline-message">{message}</div>}
 
       <section className="settings-grid settings-grid-wide">
         <article className="settings-card appearance-card">
           <Palette size={18} />
-          <div><strong>Appearance</strong><p>Light, dark, or system.</p><ThemeSwitcher /></div>
+          <div>
+            <strong>Appearance</strong>
+            <p>Light, dark, or system.</p>
+            <ThemeSwitcher />
+          </div>
         </article>
 
         <article className="settings-card">
           <Fingerprint size={18} />
-          <div><strong>Personal identity</strong><p>{email || "Authenticated user"}</p><span>Supabase Auth + owner-based RLS + private object paths</span></div>
+          <div>
+            <strong>Personal identity</strong>
+            <p>{email || "Authenticated user"}</p>
+            <span>Supabase Auth + owner-based RLS + private object paths</span>
+          </div>
         </article>
 
         <article className="settings-card">
           <Database size={18} />
-          <div><strong>Data region</strong><p>{settings?.data_region_label ?? "Loading…"}</p><span>Postgres + private Storage + pgvector</span></div>
+          <div>
+            <strong>Data region</strong>
+            <p>{settings?.data_region_label ?? "Loading…"}</p>
+            <span>Postgres + Realtime + pgvector + private metadata</span>
+          </div>
         </article>
 
         <article className="settings-card">
           <Gauge size={18} />
-          <div><strong>Upload policy</strong><p>{settings ? mb(settings.max_upload_bytes) : "Loading…"}</p><span>Storage bucket limit follows the live product configuration</span></div>
+          <div>
+            <strong>Product upload ceiling</strong>
+            <p>{settings ? formatCapacity(settings.max_upload_bytes) : "Loading…"}</p>
+            <span>
+              Large objects use the configured multipart provider; AI extraction has its own
+              smaller independent limit.
+            </span>
+          </div>
+        </article>
+
+        <article className="settings-card">
+          <Cloud size={18} />
+          <div>
+            <strong>Large-file provider</strong>
+            <p>
+              {settings?.r2_enabled
+                ? "Cloudflare R2 ready"
+                : "R2 integration ready · credentials not connected"}
+            </p>
+            <span>
+              Supabase direct limit:{" "}
+              {settings ? formatCapacity(settings.supabase_direct_upload_max_bytes) : "—"} ·
+              multipart parts:{" "}
+              {settings ? formatCapacity(settings.multipart_part_size_bytes) : "—"}
+            </span>
+          </div>
         </article>
 
         <article className="settings-card">
           <BrainCircuit size={18} />
-          <div><strong>Private intelligence</strong><p>{settings?.ai_enabled ? "Enabled" : "Disabled"}</p><span>Semantic search limit: {settings?.semantic_search_limit ?? "—"} results</span></div>
+          <div>
+            <strong>CloudVault Intelligence</strong>
+            <p>{settings?.ai_enabled ? "Hybrid retrieval enabled" : "Disabled"}</p>
+            <span>
+              Vector weight {settings ? Math.round(settings.hybrid_semantic_weight * 100) : "—"}%
+              {" · "}lexical weight{" "}
+              {settings ? Math.round(settings.hybrid_lexical_weight * 100) : "—"}%
+            </span>
+          </div>
         </article>
 
         <article className="settings-card">
           <Share2 size={18} />
-          <div><strong>Sharing</strong><p>{settings?.sharing_enabled ? "Enabled" : "Disabled"}</p><span>Default expiry: {settings?.default_share_expiry_hours ?? "—"} hours · default uses: {settings?.default_share_max_uses ?? "—"}</span></div>
+          <div>
+            <strong>Grounded generation</strong>
+            <p>
+              {settings?.generative_ai_enabled
+                ? settings.generative_ai_model
+                : "Retrieval-only by default"}
+            </p>
+            <span>
+              Gemini remains separate from storage/search and requires explicit per-user consent.
+            </span>
+          </div>
         </article>
       </section>
 
+      <SecurityPanel settings={settings} onMessage={setMessage} />
+
       <section className="privacy-explainer">
-        <div><p className="eyebrow">Isolation model</p><h2>Your account is the security boundary.</h2></div>
+        <div>
+          <p className="eyebrow">Isolation model</p>
+          <h2>Your account is the security boundary.</h2>
+        </div>
         <p>
-          File metadata, folders, versions, activity events, vector chunks, and Storage
-          objects are protected by owner-aware database or Storage policies. Public access
-          only exists when you deliberately create a temporary share token for a specific file.
+          File metadata, folders, versions, activity events, vector chunks, upload sessions,
+          and private object keys are owner-scoped. Public access exists only when you
+          deliberately create a temporary share token for a specific file.
         </p>
       </section>
     </div>

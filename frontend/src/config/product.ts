@@ -21,12 +21,29 @@ export type ProductSettings = {
   chunk_size_chars: number;
   chunk_overlap_chars: number;
   share_signed_url_seconds: number;
+  storage_provider: "supabase" | "r2";
+  large_upload_provider: "supabase" | "r2";
+  supabase_direct_upload_max_bytes: number;
+  large_upload_threshold_bytes: number;
+  multipart_part_size_bytes: number;
+  multipart_parallelism: number;
+  r2_enabled: boolean;
+  passkeys_enabled: boolean;
+  mfa_enabled: boolean;
+  mfa_required: boolean;
+  generative_ai_enabled: boolean;
+  generative_ai_provider: "gemini";
+  generative_ai_model: string;
+  grounded_answer_context_limit: number;
+  hybrid_semantic_weight: number;
+  hybrid_lexical_weight: number;
+  observability_enabled: boolean;
   updated_at: string;
 };
 
 const fallbackSettings: ProductSettings = {
   id: "default",
-  max_upload_bytes: 52_428_800,
+  max_upload_bytes: 1_610_612_736,
   default_share_expiry_hours: 24,
   max_share_expiry_hours: 168,
   default_share_max_uses: 25,
@@ -45,6 +62,23 @@ const fallbackSettings: ProductSettings = {
   chunk_size_chars: 1400,
   chunk_overlap_chars: 220,
   share_signed_url_seconds: 600,
+  storage_provider: "supabase",
+  large_upload_provider: "r2",
+  supabase_direct_upload_max_bytes: 52_428_800,
+  large_upload_threshold_bytes: 52_428_800,
+  multipart_part_size_bytes: 16_777_216,
+  multipart_parallelism: 3,
+  r2_enabled: false,
+  passkeys_enabled: false,
+  mfa_enabled: true,
+  mfa_required: false,
+  generative_ai_enabled: false,
+  generative_ai_provider: "gemini",
+  generative_ai_model: "gemini-3.8-flash",
+  grounded_answer_context_limit: 8,
+  hybrid_semantic_weight: 0.72,
+  hybrid_lexical_weight: 0.28,
+  observability_enabled: true,
   updated_at: new Date(0).toISOString(),
 };
 
@@ -80,4 +114,10 @@ export function clearProductSettingsCache() {
 
 export function productSettingsFallback() {
   return fallbackSettings;
+}
+
+export function formatCapacity(bytes: number) {
+  const gib = bytes / 1024 / 1024 / 1024;
+  if (gib >= 1) return `${gib.toFixed(gib >= 10 ? 0 : 1)} GiB`;
+  return `${Math.round(bytes / 1024 / 1024)} MB`;
 }

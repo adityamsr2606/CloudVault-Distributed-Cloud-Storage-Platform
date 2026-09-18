@@ -1,0 +1,596 @@
+-- CloudVault v2: large-object storage, security controls, hybrid retrieval, and observability.
+
+alter table public.product_settings
+  add column if not exists storage_provider text not null default 'supabase'
+    check (storage_provider in ('supabase','r2')),
+  add column if not exists large_upload_provider text not null default 'r2'
+    check (large_upload_provider in ('supabase','r2')),
+  add column if not exists supabase_direct_upload_max_bytes bigint not null default 52428800
+    check (supabase_direct_upload_max_bytes > 0),
+  add column if not exists large_upload_threshold_bytes bigint not null default 52428800
+    check (large_upload_threshold_bytes > 0),
+  add column if not exists multipart_part_size_bytes integer not null default 16777216
+    check (multipart_part_size_bytes between 5242880 and 536870912),
+  add column if not exists multipart_parallelism integer not null default 3
+    check (multipart_parallelism between 1 and 8),
+  add column if not exists r2_enabled boolean not null default false,
+  add column if not exists passkeys_enabled boolean not null default false,
+  add column if not exists mfa_enabled boolean not null default true,
+  add column if not exists mfa_required boolean not null default false,
+  add column if not exists generative_ai_enabled boolean not null default false,
+  add column if not exists generative_ai_provider text not null default 'gemini'
+    check (generative_ai_provider in ('gemini')),
+  add column if not exists generative_ai_model text not null default 'gemini-3.8-flash',
+  add column if not exists grounded_answer_context_limit integer not null default 8
+    check (grounded_answer_context_limit between 2 and 20),
+  add column if not exists hybrid_semantic_weight double precision not null default 0.72
+    check (hybrid_semantic_weight between 0 and 1),
+  add column if not exists hybrid_lexical_weight double precision not null default 0.28
+    check (hybrid_lexical_weight between 0 and 1),
+  add column if not exists observability_enabled boolean not null default true;
+
+update public.product_settings
+set max_upload_bytes = 1610612736,
+    supabase_direct_upload_max_bytes = 52428800,
+    large_upload_threshold_bytes = 52428800,
+    updated_at = now()
+where id = 'default';
+
+alter table public.vault_files
+  add column if not exists storage_provider text not null default 'supabase'
+    check (storage_provider in ('supabase','r2'));
+
+alter table public.file_versions
+  add column if not exists storage_provider text not null default 'supabase'
+    check (storage_provider in ('supabase','r2'));
+
+create table if not exists public.multipart_uploads (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  file_id uuid not null,
+  folder_id uuid null references public.vault_folders(id) on delete set null,
+  provider text not null check (provider in ('r2')),
+  provider_upload_id text not null,
+  object_key text not null,
+  file_name text not null,
+  mime_type text not null,
+  size_bytes bigint not null check (size_bytes > 0),
+  part_size_bytes integer not null check (part_size_bytes >= 5242880),
+  version_number integer not null default 1 check (version_number > 0),
+  replaces_file_id uuid null references public.vault_files(id) on delete cascade,
+  status text not null default 'initiated'
+    check (status in ('initiated','uploading','completed','aborted','failed')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  completed_at timestamptz null
+);
+
+create unique index if not exists multipart_uploads_provider_upload_uidx
+on public.multipart_uploads(provider, provider_upload_id);
+
+create index if not exists multipart_uploads_owner_created_idx
+on public.multipart_uploads(owner_id, created_at desc);
+
+alter table public.multipart_uploads enable row level security;
+
+drop policy if exists "multipart_uploads_select_own" on public.multipart_uploads;
+create policy "multipart_uploads_select_own"
+on public.multipart_uploads for select to authenticated
+using ((select auth.uid()) = owner_id);
+
+drop policy if exists "multipart_uploads_insert_own" on public.multipart_uploads;
+create policy "multipart_uploads_insert_own"
+on public.multipart_uploads for insert to authenticated
+with check ((select auth.uid()) = owner_id);
+
+drop policy if exists "multipart_uploads_update_own" on public.multipart_uploads;
+create policy "multipart_uploads_update_own"
+on public.multipart_uploads for update to authenticated
+using ((select auth.uid()) = owner_id)
+with check ((select auth.uid()) = owner_id);
+
+drop policy if exists "multipart_uploads_delete_own" on public.multipart_uploads;
+create policy "multipart_uploads_delete_own"
+on public.multipart_uploads for delete to authenticated
+using ((select auth.uid()) = owner_id);
+
+create table if not exists public.ai_query_events (
+  id bigint generated by default as identity primary key,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  query_kind text not null check (query_kind in ('hybrid_search','grounded_answer')),
+  provider text null,
+  result_count integer not null default 0,
+  duration_ms integer not null default 0,
+  status text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists ai_query_events_owner_created_idx
+on public.ai_query_events(owner_id, created_at desc);
+
+alter table public.ai_query_events enable row level security;
+
+drop policy if exists "ai_query_events_select_own" on public.ai_query_events;
+create policy "ai_query_events_select_own"
+on public.ai_query_events for select to authenticated
+using ((select auth.uid()) = owner_id);
+
+drop policy if exists "ai_query_events_insert_own" on public.ai_query_events;
+create policy "ai_query_events_insert_own"
+on public.ai_query_events for insert to authenticated
+with check ((select auth.uid()) = owner_id);
+
+create index if not exists file_chunks_fts_idx
+on public.file_chunks
+using gin (to_tsvector('english', content));
+
+create or replace function public.hybrid_search_vault(
+  query_text text,
+  query_embedding extensions.vector(384),
+  match_count integer default 20
+)
+returns table (
+  file_id uuid,
+  name text,
+  content text,
+  semantic_score double precision,
+  lexical_score double precision,
+  score double precision
+)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  with cfg as (
+    select hybrid_semantic_weight as sw,
+           hybrid_lexical_weight as lw
+    from public.product_settings
+    where id = 'default'
+  ),
+  semantic as (
+    select
+      c.id,
+      c.file_id,
+      f.name,
+      c.content,
+      (1 - (c.embedding OPERATOR(extensions.<=>) query_embedding))::double precision
+        as semantic_score,
+      0::double precision as lexical_score
+    from public.file_chunks c
+    join public.vault_files f on f.id = c.file_id
+    where c.owner_id = (select auth.uid())
+      and f.owner_id = (select auth.uid())
+      and f.deleted_at is null
+      and c.embedding is not null
+    order by c.embedding OPERATOR(extensions.<=>) query_embedding
+    limit least(greatest(match_count * 4, 20), 200)
+  ),
+  lexical as (
+    select
+      c.id,
+      c.file_id,
+      f.name,
+      c.content,
+      0::double precision as semantic_score,
+      ts_rank_cd(
+        to_tsvector('english', c.content),
+        websearch_to_tsquery('english', query_text)
+      )::double precision as lexical_score
+    from public.file_chunks c
+    join public.vault_files f on f.id = c.file_id
+    where c.owner_id = (select auth.uid())
+      and f.owner_id = (select auth.uid())
+      and f.deleted_at is null
+      and to_tsvector('english', c.content)
+          @@ websearch_to_tsquery('english', query_text)
+    order by lexical_score desc
+    limit least(greatest(match_count * 4, 20), 200)
+  ),
+  combined as (
+    select
+      id,
+      file_id,
+      name,
+      content,
+      max(semantic_score) as semantic_score,
+      max(lexical_score) as lexical_score
+    from (
+      select * from semantic
+      union all
+      select * from lexical
+    ) candidates
+    group by id, file_id, name, content
+  )
+  select
+    c.file_id,
+    c.name,
+    c.content,
+    c.semantic_score,
+    c.lexical_score,
+    (
+      cfg.sw * greatest(c.semantic_score, 0)
+      + cfg.lw * least(c.lexical_score, 1)
+    )::double precision as score
+  from combined c
+  cross join cfg
+  order by score desc
+  limit least(greatest(match_count, 1), 50);
+$$;
+
+grant execute on function public.hybrid_search_vault(text, extensions.vector, integer)
+to authenticated;
+
+create or replace function public.sync_cloudvault_bucket_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  update storage.buckets
+  set file_size_limit = new.supabase_direct_upload_max_bytes
+  where id = 'cloudvault-files';
+  return new;
+end;
+$$;
+
+revoke all on function public.sync_cloudvault_bucket_limit()
+from public, anon, authenticated;
+
+drop trigger if exists sync_cloudvault_bucket_limit_trigger
+on public.product_settings;
+
+create trigger sync_cloudvault_bucket_limit_trigger
+after insert or update of supabase_direct_upload_max_bytes on public.product_settings
+for each row execute function public.sync_cloudvault_bucket_limit();
+
+update storage.buckets b
+set file_size_limit = s.supabase_direct_upload_max_bytes
+from public.product_settings s
+where b.id = 'cloudvault-files'
+  and s.id = 'default';
+
+create or replace function public.consume_share_link(p_token_hash text)
+returns table (
+  file_id uuid,
+  file_name text,
+  storage_path text,
+  storage_provider text,
+  mime_type text,
+  size_bytes bigint
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_link public.share_links%rowtype;
+  v_file public.vault_files%rowtype;
+begin
+  select *
+  into v_link
+  from public.share_links
+  where token_hash = p_token_hash
+  for update;
+
+  if not found
+     or v_link.revoked_at is not null
+     or v_link.expires_at <= now()
+     or (v_link.max_uses is not null and v_link.use_count >= v_link.max_uses)
+  then
+    return;
+  end if;
+
+  select *
+  into v_file
+  from public.vault_files
+  where id = v_link.file_id
+    and deleted_at is null;
+
+  if not found then
+    return;
+  end if;
+
+  update public.share_links
+  set use_count = use_count + 1
+  where id = v_link.id;
+
+  return query
+  select
+    v_file.id,
+    v_file.name,
+    v_file.storage_path,
+    v_file.storage_provider,
+    v_file.mime_type,
+    v_file.size_bytes;
+end;
+$$;
+
+revoke all on function public.consume_share_link(text) from public, anon, authenticated;
+grant execute on function public.consume_share_link(text) to service_role;
+
+
+create table if not exists public.user_preferences (
+  owner_id uuid primary key references auth.users(id) on delete cascade,
+  allow_external_ai boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.user_preferences enable row level security;
+
+drop policy if exists "user_preferences_select_own" on public.user_preferences;
+create policy "user_preferences_select_own"
+on public.user_preferences for select to authenticated
+using ((select auth.uid()) = owner_id);
+
+drop policy if exists "user_preferences_insert_own" on public.user_preferences;
+create policy "user_preferences_insert_own"
+on public.user_preferences for insert to authenticated
+with check ((select auth.uid()) = owner_id);
+
+drop policy if exists "user_preferences_update_own" on public.user_preferences;
+create policy "user_preferences_update_own"
+on public.user_preferences for update to authenticated
+using ((select auth.uid()) = owner_id)
+with check ((select auth.uid()) = owner_id);
+
+insert into public.user_preferences(owner_id)
+select id from auth.users
+on conflict (owner_id) do nothing;
+
+
+grant select, insert, update, delete on public.multipart_uploads to authenticated;
+grant select, insert, update on public.user_preferences to authenticated;
+grant select, insert on public.ai_query_events to authenticated;
+
+
+alter table public.vault_folders
+  add column if not exists trash_root_id uuid,
+  add column if not exists trash_previous_parent_id uuid;
+
+alter table public.vault_files
+  add column if not exists trashed_by_folder_id uuid;
+
+create index if not exists vault_folders_trash_root_idx
+on public.vault_folders(owner_id, trash_root_id)
+where trash_root_id is not null;
+
+create index if not exists vault_files_trashed_by_folder_idx
+on public.vault_files(owner_id, trashed_by_folder_id)
+where trashed_by_folder_id is not null;
+
+create or replace function public.trash_vault_folder(p_folder_id uuid)
+returns table (folders_trashed integer, files_trashed integer)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_owner uuid := (select auth.uid());
+  v_folder_ids uuid[];
+  v_root_parent uuid;
+  v_folders integer := 0;
+  v_files integer := 0;
+begin
+  if v_owner is null then
+    raise exception 'Authentication required';
+  end if;
+
+  select parent_id
+  into v_root_parent
+  from public.vault_folders
+  where id = p_folder_id
+    and owner_id = v_owner
+    and deleted_at is null;
+
+  if not found then
+    raise exception 'Folder not found';
+  end if;
+
+  with recursive folder_tree as (
+    select id
+    from public.vault_folders
+    where id = p_folder_id
+      and owner_id = v_owner
+      and deleted_at is null
+
+    union all
+
+    select child.id
+    from public.vault_folders child
+    join folder_tree parent on child.parent_id = parent.id
+    where child.owner_id = v_owner
+      and child.deleted_at is null
+  )
+  select array_agg(id)
+  into v_folder_ids
+  from folder_tree;
+
+  update public.vault_files
+  set
+    deleted_at = now(),
+    status = 'deleted',
+    trashed_by_folder_id = p_folder_id,
+    updated_at = now()
+  where owner_id = v_owner
+    and folder_id = any(v_folder_ids)
+    and deleted_at is null;
+
+  get diagnostics v_files = row_count;
+
+  update public.vault_folders
+  set
+    deleted_at = now(),
+    trash_root_id = p_folder_id,
+    trash_previous_parent_id =
+      case when id = p_folder_id then v_root_parent else trash_previous_parent_id end,
+    parent_id =
+      case when id = p_folder_id then null else parent_id end,
+    updated_at = now()
+  where owner_id = v_owner
+    and id = any(v_folder_ids)
+    and deleted_at is null;
+
+  get diagnostics v_folders = row_count;
+
+  insert into public.activity_events(owner_id, file_id, event_type, detail)
+  values (
+    v_owner,
+    null,
+    'folder_deleted',
+    jsonb_build_object(
+      'folder_id', p_folder_id,
+      'folders', v_folders,
+      'files', v_files
+    )
+  );
+
+  return query select v_folders, v_files;
+end;
+$$;
+
+grant execute on function public.trash_vault_folder(uuid) to authenticated;
+
+create or replace function public.restore_vault_folder(p_folder_id uuid)
+returns table (folders_restored integer, files_restored integer)
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_owner uuid := (select auth.uid());
+  v_previous_parent uuid;
+  v_restore_parent uuid;
+  v_folders integer := 0;
+  v_files integer := 0;
+begin
+  if v_owner is null then
+    raise exception 'Authentication required';
+  end if;
+
+  select trash_previous_parent_id
+  into v_previous_parent
+  from public.vault_folders
+  where id = p_folder_id
+    and owner_id = v_owner
+    and deleted_at is not null
+    and trash_root_id = p_folder_id;
+
+  if not found then
+    raise exception 'Trashed folder not found';
+  end if;
+
+  if v_previous_parent is not null and exists (
+    select 1
+    from public.vault_folders
+    where id = v_previous_parent
+      and owner_id = v_owner
+      and deleted_at is null
+  ) then
+    v_restore_parent := v_previous_parent;
+  else
+    v_restore_parent := null;
+  end if;
+
+  update public.vault_folders
+  set
+    deleted_at = null,
+    parent_id = case when id = p_folder_id then v_restore_parent else parent_id end,
+    trash_root_id = null,
+    trash_previous_parent_id = null,
+    updated_at = now()
+  where owner_id = v_owner
+    and trash_root_id = p_folder_id;
+
+  get diagnostics v_folders = row_count;
+
+  update public.vault_files
+  set
+    deleted_at = null,
+    status = 'ready',
+    trashed_by_folder_id = null,
+    updated_at = now()
+  where owner_id = v_owner
+    and trashed_by_folder_id = p_folder_id;
+
+  get diagnostics v_files = row_count;
+
+  insert into public.activity_events(owner_id, file_id, event_type, detail)
+  values (
+    v_owner,
+    null,
+    'folder_restored',
+    jsonb_build_object(
+      'folder_id', p_folder_id,
+      'folders', v_folders,
+      'files', v_files
+    )
+  );
+
+  return query select v_folders, v_files;
+end;
+$$;
+
+grant execute on function public.restore_vault_folder(uuid) to authenticated;
+
+
+revoke all on function public.trash_vault_folder(uuid) from public, anon;
+grant execute on function public.trash_vault_folder(uuid) to authenticated;
+
+revoke all on function public.restore_vault_folder(uuid) from public, anon;
+grant execute on function public.restore_vault_folder(uuid) to authenticated;
+
+create or replace function public.restore_vault_file(p_file_id uuid)
+returns public.vault_files
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_owner uuid := (select auth.uid());
+  v_file public.vault_files%rowtype;
+  v_parent_deleted boolean := false;
+begin
+  if v_owner is null then
+    raise exception 'Authentication required';
+  end if;
+
+  select *
+  into v_file
+  from public.vault_files
+  where id = p_file_id
+    and owner_id = v_owner
+    and deleted_at is not null;
+
+  if not found then
+    raise exception 'Trashed file not found';
+  end if;
+
+  if v_file.folder_id is not null then
+    select exists (
+      select 1
+      from public.vault_folders
+      where id = v_file.folder_id
+        and owner_id = v_owner
+        and deleted_at is not null
+    ) into v_parent_deleted;
+  end if;
+
+  update public.vault_files
+  set
+    status = 'ready',
+    deleted_at = null,
+    folder_id = case when v_parent_deleted then null else folder_id end,
+    trashed_by_folder_id = null,
+    updated_at = now()
+  where id = p_file_id
+    and owner_id = v_owner
+  returning * into v_file;
+
+  return v_file;
+end;
+$$;
+
+revoke all on function public.restore_vault_file(uuid) from public, anon;
+grant execute on function public.restore_vault_file(uuid) to authenticated;
