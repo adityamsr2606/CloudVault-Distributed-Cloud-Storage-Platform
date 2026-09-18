@@ -45,10 +45,6 @@ type MultipartStatus = MultipartSession & {
   file?: VaultFile;
 };
 
-function legacyUploadKey(file: File) {
-  return "cloudvault-upload:" + file.name + ":" + file.size + ":" + file.lastModified;
-}
-
 function safeJsonParse<T>(value: string | null): T | null {
   if (!value) return null;
   try {
@@ -124,7 +120,8 @@ export class CloudUploadTask {
   private sessionId: string | null = null;
   private paused = false;
   private cancelled = false;
-  private resumeResolver: (() => void) | null = null;
+  private ownerId: string | null = null;
+  private resumeResolvers = new Set<() => void>();
   private activeRequests = new Set<XMLHttpRequest>();
   private partProgress = new Map<number, number>();
   private completedParts = new Map<number, PartRecord>();
@@ -157,8 +154,7 @@ export class CloudUploadTask {
 
     this.paused = false;
     this.state = "uploading";
-    this.resumeResolver?.();
-    this.resumeResolver = null;
+    this.releasePausedWorkers();
     this.emitProgress();
   }
 
@@ -172,8 +168,7 @@ export class CloudUploadTask {
     for (const request of this.activeRequests) request.abort();
     this.activeRequests.clear();
 
-    this.resumeResolver?.();
-    this.resumeResolver = null;
+    this.releasePausedWorkers();
 
     if (this.sessionId) {
       try {
@@ -561,12 +556,17 @@ export class CloudUploadTask {
     });
   }
 
-  private async waitUntilResumed() {
-    if (!this.paused) return;
+  private releasePausedWorkers() {
+    for (const resolve of this.resumeResolvers) resolve();
+    this.resumeResolvers.clear();
+  }
 
-    await new Promise<void>((resolve) => {
-      this.resumeResolver = resolve;
-    });
+  private async waitUntilResumed() {
+    while (this.paused && !this.cancelled) {
+      await new Promise<void>((resolve) => {
+        this.resumeResolvers.add(resolve);
+      });
+    }
   }
 
   private emitProgress(forceLoaded?: number) {
