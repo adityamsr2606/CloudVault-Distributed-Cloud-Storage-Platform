@@ -533,3 +533,64 @@ end;
 $$;
 
 grant execute on function public.restore_vault_folder(uuid) to authenticated;
+
+
+revoke all on function public.trash_vault_folder(uuid) from public, anon;
+grant execute on function public.trash_vault_folder(uuid) to authenticated;
+
+revoke all on function public.restore_vault_folder(uuid) from public, anon;
+grant execute on function public.restore_vault_folder(uuid) to authenticated;
+
+create or replace function public.restore_vault_file(p_file_id uuid)
+returns public.vault_files
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_owner uuid := (select auth.uid());
+  v_file public.vault_files%rowtype;
+  v_parent_deleted boolean := false;
+begin
+  if v_owner is null then
+    raise exception 'Authentication required';
+  end if;
+
+  select *
+  into v_file
+  from public.vault_files
+  where id = p_file_id
+    and owner_id = v_owner
+    and deleted_at is not null;
+
+  if not found then
+    raise exception 'Trashed file not found';
+  end if;
+
+  if v_file.folder_id is not null then
+    select exists (
+      select 1
+      from public.vault_folders
+      where id = v_file.folder_id
+        and owner_id = v_owner
+        and deleted_at is not null
+    ) into v_parent_deleted;
+  end if;
+
+  update public.vault_files
+  set
+    status = 'ready',
+    deleted_at = null,
+    folder_id = case when v_parent_deleted then null else folder_id end,
+    trashed_by_folder_id = null,
+    updated_at = now()
+  where id = p_file_id
+    and owner_id = v_owner
+  returning * into v_file;
+
+  return v_file;
+end;
+$$;
+
+revoke all on function public.restore_vault_file(uuid) from public, anon;
+grant execute on function public.restore_vault_file(uuid) to authenticated;
