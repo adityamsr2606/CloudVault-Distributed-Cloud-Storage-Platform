@@ -1,6 +1,18 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 
+declare const Supabase: {
+  ai: {
+    Session: new (model: string) => {
+      run: (
+        input: string,
+        options: { mean_pool: boolean; normalize: boolean },
+      ) => Promise<number[]>;
+    };
+  };
+};
+
+
 type SearchRequest = { query: string; limit?: number };
 
 const corsHeaders = {
