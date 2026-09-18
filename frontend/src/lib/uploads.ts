@@ -183,7 +183,12 @@ export class CloudUploadTask {
   }
 
   private storageKey() {
+    if (!this.ownerId) {
+      throw new Error("Cannot persist an upload session without an authenticated owner.");
+    }
+
     const context = [
+      this.ownerId,
       this.replaceFile?.id ?? "new",
       this.folderId ?? "root",
       this.file.name,
@@ -197,25 +202,9 @@ export class CloudUploadTask {
   }
 
   private readStoredSession() {
-    const primaryKey = this.storageKey();
-    const primary = safeJsonParse<{ session_id: string }>(
-      localStorage.getItem(primaryKey),
+    return safeJsonParse<{ session_id: string }>(
+      localStorage.getItem(this.storageKey()),
     );
-
-    if (primary?.session_id) return primary;
-
-    const legacyKey = legacyUploadKey(this.file);
-    const legacy = safeJsonParse<{ session_id: string }>(
-      localStorage.getItem(legacyKey),
-    );
-
-    if (legacy?.session_id) {
-      localStorage.setItem(primaryKey, JSON.stringify(legacy));
-      localStorage.removeItem(legacyKey);
-      return legacy;
-    }
-
-    return null;
   }
 
   private storeSession(sessionId: string) {
@@ -227,7 +216,6 @@ export class CloudUploadTask {
 
   private clearStoredSession() {
     localStorage.removeItem(this.storageKey());
-    localStorage.removeItem(legacyUploadKey(this.file));
   }
 
   private providerEnabled(provider: string) {
@@ -256,7 +244,17 @@ export class CloudUploadTask {
   }
 
   private async run() {
-    this.settings = await getProductSettings();
+    const [settings, auth] = await Promise.all([
+      getProductSettings(),
+      supabase.auth.getUser(),
+    ]);
+
+    this.settings = settings;
+    this.ownerId = auth.data.user?.id ?? null;
+
+    if (auth.error || !this.ownerId) {
+      throw new Error("Your session expired. Sign in again before uploading.");
+    }
 
     if (this.file.size <= 0) throw new Error("Empty files are not accepted.");
 
