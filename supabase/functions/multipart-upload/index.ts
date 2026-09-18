@@ -109,23 +109,24 @@ Deno.serve(async (req: Request) => {
       .single();
 
     if (settingsError || !settings) throw settingsError ?? new Error("Missing product settings");
-    const provider = String(settings.large_upload_provider ?? "b2");
-    const providerEnabled =
-      provider === "b2"
-        ? Boolean(settings.b2_enabled)
-        : provider === "r2"
-          ? Boolean(settings.r2_enabled)
-          : false;
-
-    if (!providerEnabled) {
-      return json({ error: "The configured large-file provider is not enabled yet." }, 503);
-    }
 
     const body = await req.json();
     const action = String(body.action ?? "");
-    const { client, bucket } = objectStore(provider);
 
     if (action === "initiate") {
+      const provider = String(settings.large_upload_provider ?? "b2");
+      const providerEnabled =
+        provider === "b2"
+          ? Boolean(settings.b2_enabled)
+          : provider === "r2"
+            ? Boolean(settings.r2_enabled)
+            : false;
+
+      if (!providerEnabled) {
+        return json({ error: "The configured large-file provider is not enabled yet." }, 503);
+      }
+
+      const { client, bucket } = objectStore(provider);
       const fileName = safeName(String(body.file_name ?? ""));
       const mimeType = String(body.mime_type ?? "application/octet-stream");
       const sizeBytes = Number(body.size_bytes ?? 0);
@@ -235,6 +236,9 @@ Deno.serve(async (req: Request) => {
     if (sessionError || !session || session.owner_id !== authData.user.id) {
       return json({ error: "Upload session not found." }, 404);
     }
+
+    const sessionProvider = String(session.provider ?? "r2");
+    const { client, bucket } = objectStore(sessionProvider);
 
     const totalParts = Math.ceil(
       Number(session.size_bytes) / Number(session.part_size_bytes),
@@ -373,7 +377,7 @@ Deno.serve(async (req: Request) => {
             owner_id: authData.user.id,
             version_number: session.version_number,
             storage_path: session.object_key,
-            storage_provider: provider,
+            storage_provider: sessionProvider,
             mime_type: session.mime_type,
             size_bytes: session.size_bytes,
             sha256: null,
@@ -386,7 +390,7 @@ Deno.serve(async (req: Request) => {
           .update({
             name: session.file_name,
             storage_path: session.object_key,
-            storage_provider: provider,
+            storage_provider: sessionProvider,
             mime_type: session.mime_type,
             size_bytes: session.size_bytes,
             sha256: null,
@@ -409,7 +413,7 @@ Deno.serve(async (req: Request) => {
             folder_id: session.folder_id,
             name: session.file_name,
             storage_path: session.object_key,
-            storage_provider: provider,
+            storage_provider: sessionProvider,
             mime_type: session.mime_type,
             size_bytes: session.size_bytes,
             sha256: null,
@@ -428,7 +432,7 @@ Deno.serve(async (req: Request) => {
             owner_id: authData.user.id,
             version_number: 1,
             storage_path: session.object_key,
-            storage_provider: provider,
+            storage_provider: sessionProvider,
             mime_type: session.mime_type,
             size_bytes: session.size_bytes,
             sha256: null,
@@ -455,6 +459,7 @@ Deno.serve(async (req: Request) => {
             size_bytes: session.size_bytes,
             parts: totalParts,
             duration_ms: Date.now() - started,
+            provider: sessionProvider,
           }),
         );
       }
