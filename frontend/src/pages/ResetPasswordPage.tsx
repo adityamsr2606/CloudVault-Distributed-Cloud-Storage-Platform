@@ -3,6 +3,7 @@ import { KeyRound } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import LiveBackdrop from "../components/LiveBackdrop";
+import { passwordPolicyError } from "../lib/passwordPolicy";
 import { supabase } from "../lib/supabase";
 
 export default function ResetPasswordPage() {
@@ -15,6 +16,13 @@ export default function ResetPasswordPage() {
     event.preventDefault();
     setBusy(true);
     setMessage("");
+
+    const policyError = passwordPolicyError(password);
+    if (policyError) {
+      setMessage(policyError);
+      setBusy(false);
+      return;
+    }
 
     const { error } = await supabase.auth.updateUser({ password });
     if (error) {
@@ -41,8 +49,9 @@ export default function ResetPasswordPage() {
             New password
             <input
               required
-              minLength={8}
+              minLength={12}
               type="password"
+              placeholder="12+ chars, upper/lower/number/symbol"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />
