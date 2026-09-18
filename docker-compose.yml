@@ -116,6 +116,17 @@ services:
       elasticsearch:
         condition: service_healthy
 
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: /api/v1
+    ports:
+      - "8080:8080"
+    depends_on:
+      api:
+        condition: service_started
+
 volumes:
   postgres_data:
   redis_data:

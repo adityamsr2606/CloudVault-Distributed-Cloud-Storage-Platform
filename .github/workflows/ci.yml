@@ -34,3 +34,25 @@ jobs:
 
       - name: Build backend image
         run: docker build -t cloudvault-api .
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck and build
+        run: npm run build
+
+      - name: Build frontend image
+        run: docker build -t cloudvault-web .
