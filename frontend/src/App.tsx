@@ -3,12 +3,14 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 
 import AppShell from "./components/AppShell";
+import { getProductSettings } from "./config/product";
 import { supabase } from "./lib/supabase";
 import ActivityPage from "./pages/ActivityPage";
 import AuthPage from "./pages/AuthPage";
 import DashboardPage from "./pages/DashboardPage";
 import IntelligencePage from "./pages/IntelligencePage";
 import LandingPage from "./pages/LandingPage";
+import MfaChallengePage from "./pages/MfaChallengePage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import SettingsPage from "./pages/SettingsPage";
 import ShareResolvePage from "./pages/ShareResolvePage";
@@ -17,7 +19,47 @@ import TrashPage from "./pages/TrashPage";
 import VaultPage from "./pages/VaultPage";
 
 function Protected({ session }: { session: Session | null }) {
+  const [checked, setChecked] = useState(false);
+  const [needsMfa, setNeedsMfa] = useState(false);
+
+  useEffect(() => {
+    if (!session) {
+      setChecked(true);
+      setNeedsMfa(false);
+      return;
+    }
+
+    let active = true;
+
+    void Promise.all([
+      getProductSettings(),
+      supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
+    ])
+      .then(([settings, aal]) => {
+        if (!active) return;
+        if (aal.error) throw aal.error;
+
+        const enrolledButUnverified =
+          aal.data.currentLevel !== "aal2" && aal.data.nextLevel === "aal2";
+
+        setNeedsMfa(Boolean(settings.mfa_enabled && enrolledButUnverified));
+        setChecked(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setNeedsMfa(false);
+        setChecked(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [session?.access_token]);
+
   if (!session) return <Navigate to="/auth" replace />;
+  if (!checked) return <div className="boot-screen">Verifying CloudVault session…</div>;
+  if (needsMfa) return <Navigate to="/mfa" replace />;
+
   return <AppShell />;
 }
 
@@ -45,6 +87,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/auth" element={<AuthPage sessionReady={Boolean(session)} />} />
+      <Route path="/mfa" element={<MfaChallengePage session={session} />} />
       <Route path="/s/:token" element={<ShareResolvePage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route element={<Protected session={session} />}>

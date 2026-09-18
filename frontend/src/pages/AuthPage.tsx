@@ -1,19 +1,25 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Fingerprint, KeyRound, LockKeyhole, Search } from "lucide-react";
 import { Navigate, useNavigate } from "react-router-dom";
 
 import CloudVaultLogo from "../components/CloudVaultLogo";
 import LiveBackdrop from "../components/LiveBackdrop";
 import ThemeSwitcher from "../components/ThemeSwitcher";
+import { getProductSettings, type ProductSettings } from "../config/product";
 import { supabase } from "../lib/supabase";
 
 export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
   const navigate = useNavigate();
   const [mode, setMode] = useState<"login" | "register">("login");
+  const [settings, setSettings] = useState<ProductSettings | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    void getProductSettings().then(setSettings).catch(() => setSettings(null));
+  }, []);
 
   if (sessionReady) return <Navigate to="/app" replace />;
 
@@ -40,6 +46,21 @@ export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
     }
   }
 
+  async function signInWithPasskey() {
+    setBusy(true);
+    setMessage("");
+
+    try {
+      const { error } = await supabase.auth.signInWithPasskey();
+      if (error) throw error;
+      navigate("/app");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Passkey sign-in failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function resetPassword() {
     if (!email) {
       setMessage("Enter your email first.");
@@ -47,7 +68,7 @@ export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
     }
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: window.location.origin + "/reset-password",
     });
     setMessage(error ? error.message : "Password reset email sent.");
   }
@@ -68,8 +89,8 @@ export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
           <h1>Keep the files. Find the meaning.</h1>
           <p>
             CloudVault is a private workspace for your own files: encrypted transport,
-            database-enforced ownership, versioned storage, expiring shares, and semantic
-            search that can only retrieve content your account is allowed to see.
+            database-enforced ownership, versioned storage, expiring shares, hybrid search,
+            and optional grounded AI that respects your account boundary.
           </p>
         </div>
 
@@ -77,17 +98,17 @@ export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
           <div>
             <span><Fingerprint size={17} /></span>
             <strong>Identity isolated</strong>
-            <small>Every row and object path is scoped to its owner.</small>
+            <small>Every row, vector and object path is scoped to its owner.</small>
           </div>
           <div>
             <span><Search size={17} /></span>
-            <strong>Meaning-aware</strong>
-            <small>Search your own indexed content beyond filenames.</small>
+            <strong>Hybrid retrieval</strong>
+            <small>Meaning-aware and lexical search work together inside your vault.</small>
           </div>
           <div>
             <span><LockKeyhole size={17} /></span>
             <strong>Private sharing</strong>
-            <small>Revocable links resolve to short-lived signed URLs.</small>
+            <small>Revocable links resolve to short-lived signed object URLs.</small>
           </div>
         </div>
       </section>
@@ -102,6 +123,21 @@ export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
               : "A new account starts with an empty, isolated workspace."}
           </p>
         </div>
+
+        {mode === "login" && settings?.passkeys_enabled && (
+          <>
+            <button
+              className="passkey-button"
+              type="button"
+              disabled={busy}
+              onClick={() => void signInWithPasskey()}
+            >
+              <Fingerprint size={16} />
+              Sign in with a passkey
+            </button>
+            <div className="auth-divider"><span>or use email</span></div>
+          </>
+        )}
 
         <form onSubmit={submit} className="auth-form">
           <label>
@@ -136,7 +172,10 @@ export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
         </form>
 
         <div className="auth-links">
-          <button className="text-button" onClick={() => setMode(mode === "login" ? "register" : "login")}>
+          <button
+            className="text-button"
+            onClick={() => setMode(mode === "login" ? "register" : "login")}
+          >
             {mode === "login" ? "Create an account" : "I already have an account"}
           </button>
           {mode === "login" && (

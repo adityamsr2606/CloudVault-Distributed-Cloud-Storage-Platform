@@ -1,9 +1,28 @@
-import { ChevronRight, Folder, FolderPlus, Grid2X2, List, Upload } from "lucide-react";
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChevronRight,
+  Folder,
+  FolderPlus,
+  Grid2X2,
+  List,
+  Upload,
+} from "lucide-react";
+import {
+  ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import FileActions from "../components/FileActions";
 import FileInspector from "../components/FileInspector";
-import { getProductSettings, type ProductSettings } from "../config/product";
+import UploadDock from "../components/UploadDock";
+import {
+  formatCapacity,
+  getProductSettings,
+  type ProductSettings,
+} from "../config/product";
 import { useRealtimeRefresh } from "../hooks/useRealtimeRefresh";
 import {
   VaultFile,
@@ -11,13 +30,17 @@ import {
   createFolder,
   listFiles,
   listFolders,
-  uploadVaultFile,
 } from "../lib/cloudvault";
+import {
+  CloudUploadTask,
+  UploadProgress,
+  startVaultUpload,
+} from "../lib/uploads";
 
 function bytes(value: number) {
   return value < 1024 * 1024
-    ? `${Math.max(1, Math.round(value / 1024))} KB`
-    : `${(value / 1024 / 1024).toFixed(1)} MB`;
+    ? Math.max(1, Math.round(value / 1024)) + " KB"
+    : (value / 1024 / 1024).toFixed(1) + " MB";
 }
 
 export default function VaultPage({ starredOnly = false }: { starredOnly?: boolean }) {
@@ -27,8 +50,10 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<VaultFile | null>(null);
   const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
   const [view, setView] = useState<"list" | "grid">("list");
+  const [uploadTask, setUploadTask] = useState<CloudUploadTask | null>(null);
+  const [uploadName, setUploadName] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
   const picker = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -66,15 +91,36 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    setBusy(true);
+
     setMessage("");
+    setUploadName(file.name);
+
+    let latestProgress: UploadProgress | null = null;
+    const task = startVaultUpload(file, activeFolder, (progress) => {
+      latestProgress = progress;
+      setUploadProgress(progress);
+    });
+
+    setUploadTask(task);
+
     try {
-      await uploadVaultFile(file, activeFolder);
-      setMessage(settings?.ai_enabled ? "Uploaded. Private AI indexing is running." : "Uploaded.");
+      await task.completion;
+      setMessage(
+        settings?.ai_enabled
+          ? "Upload complete. Eligible text content is indexed privately."
+          : "Upload complete.",
+      );
+      await refresh();
     } catch (error) {
+      setUploadProgress((current) =>
+        current
+          ? { ...current, state: "failed" }
+          : latestProgress
+            ? { ...latestProgress, state: "failed" }
+            : null,
+      );
       setMessage(error instanceof Error ? error.message : "Upload failed");
     } finally {
-      setBusy(false);
       event.target.value = "";
     }
   }
@@ -82,6 +128,7 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
   async function newFolder() {
     const name = window.prompt("Folder name");
     if (!name?.trim()) return;
+
     try {
       await createFolder(name, activeFolder);
     } catch (error) {
@@ -89,14 +136,24 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
     }
   }
 
+  const uploadBusy =
+    uploadProgress != null &&
+    ["preparing", "uploading", "paused", "completing"].includes(uploadProgress.state);
+
   return (
     <div className="page-wrap">
       <header className="page-header">
         <div>
           <p className="eyebrow">{starredOnly ? "Pinned workspace" : "Personal object browser"}</p>
           <h1>{starredOnly ? "Starred" : "My vault"}</h1>
-          <p>Only files owned by your signed-in account can appear here.</p>
+          <p>
+            Only files owned by your signed-in account can appear here.
+            {!starredOnly && settings
+              ? " Upload policy: " + formatCapacity(settings.max_upload_bytes) + " per file."
+              : ""}
+          </p>
         </div>
+
         <div className="header-actions">
           {!starredOnly && settings?.folders_enabled !== false && (
             <button className="ghost-button" onClick={newFolder}>
@@ -104,8 +161,12 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
             </button>
           )}
           {!starredOnly && (
-            <button className="primary-button compact" onClick={() => picker.current?.click()} disabled={busy}>
-              <Upload size={16} /> {busy ? "Uploading…" : "Upload"}
+            <button
+              className="primary-button compact"
+              onClick={() => picker.current?.click()}
+              disabled={uploadBusy}
+            >
+              <Upload size={16} /> {uploadBusy ? "Upload active" : "Upload"}
             </button>
           )}
           <input ref={picker} hidden type="file" onChange={upload} />
@@ -113,6 +174,17 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
       </header>
 
       {message && <div className="inline-message">{message}</div>}
+
+      {!starredOnly && settings && !settings.r2_enabled && (
+        <div className="provider-notice">
+          <span>
+            <strong>1.5 GiB policy is configured.</strong>
+            Large-file R2 credentials are not connected yet, so the active hosted provider
+            currently accepts direct files up to{" "}
+            {formatCapacity(settings.supabase_direct_upload_max_bytes)}.
+          </span>
+        </div>
+      )}
 
       {!starredOnly && settings?.folders_enabled !== false && (
         <div className="vault-breadcrumb">
@@ -146,8 +218,20 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
             <h2>{files.length} objects</h2>
           </div>
           <div className="view-toggle">
-            <button aria-label="List view" className={view === "list" ? "active" : ""} onClick={() => setView("list")}><List size={16} /></button>
-            <button aria-label="Grid view" className={view === "grid" ? "active" : ""} onClick={() => setView("grid")}><Grid2X2 size={16} /></button>
+            <button
+              aria-label="List view"
+              className={view === "list" ? "active" : ""}
+              onClick={() => setView("list")}
+            >
+              <List size={16} />
+            </button>
+            <button
+              aria-label="Grid view"
+              className={view === "grid" ? "active" : ""}
+              onClick={() => setView("grid")}
+            >
+              <Grid2X2 size={16} />
+            </button>
           </div>
         </div>
 
@@ -159,12 +243,16 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
               </button>
               <button className="file-main file-open" onClick={() => setSelectedFile(file)}>
                 <strong>{file.name}</strong>
-                <span>{bytes(file.size_bytes)} · v{file.current_version}</span>
+                <span>
+                  {bytes(file.size_bytes)} · v{file.current_version}
+                  {file.storage_provider === "r2" ? " · R2" : ""}
+                </span>
               </button>
-              <span className={`status-pill ${file.status}`}>{file.status}</span>
+              <span className={"status-pill " + file.status}>{file.status}</span>
               <FileActions file={file} onChange={() => void refresh()} onMessage={setMessage} />
             </div>
           ))}
+
           {files.length === 0 && (
             <div className="empty-state">
               {starredOnly
@@ -183,6 +271,14 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
           onClose={() => setSelectedFile(null)}
           onChanged={() => void refresh()}
           onMessage={setMessage}
+        />
+      )}
+
+      {uploadTask && uploadProgress && (
+        <UploadDock
+          fileName={uploadName}
+          progress={uploadProgress}
+          task={uploadTask}
         />
       )}
     </div>

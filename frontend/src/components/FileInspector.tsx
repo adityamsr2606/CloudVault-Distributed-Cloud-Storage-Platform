@@ -8,14 +8,22 @@ import {
   getVersionDownloadUrl,
   listFileVersions,
   relatedFiles,
-  replaceVaultFile,
   restoreFileVersion,
 } from "../lib/cloudvault";
+import {
+  CloudUploadTask,
+  UploadProgress,
+  startVaultReplacement,
+} from "../lib/uploads";
+import UploadDock from "./UploadDock";
 
 function formatBytes(value: number) {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value < 1024) return value + " B";
+  if (value < 1024 * 1024) return Math.round(value / 1024) + " KB";
+  if (value < 1024 * 1024 * 1024) {
+    return (value / 1024 / 1024).toFixed(1) + " MB";
+  }
+  return (value / 1024 / 1024 / 1024).toFixed(2) + " GB";
 }
 
 export default function FileInspector({
@@ -32,6 +40,9 @@ export default function FileInspector({
   const [versions, setVersions] = useState<FileVersion[]>([]);
   const [related, setRelated] = useState<RelatedFile[]>([]);
   const [busy, setBusy] = useState(false);
+  const [uploadTask, setUploadTask] = useState<CloudUploadTask | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [uploadName, setUploadName] = useState("");
   const picker = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -50,12 +61,20 @@ export default function FileInspector({
     if (!replacement) return;
 
     setBusy(true);
+    setUploadName(replacement.name);
+
+    const task = startVaultReplacement(replacement, file, setUploadProgress);
+    setUploadTask(task);
+
     try {
-      await replaceVaultFile(file, replacement);
-      onMessage(`Uploaded version ${file.current_version + 1}.`);
+      await task.completion;
+      onMessage("Uploaded version " + (file.current_version + 1) + ".");
       onChanged();
       onClose();
     } catch (error) {
+      setUploadProgress((current) =>
+        current ? { ...current, state: "failed" } : current,
+      );
       onMessage(error instanceof Error ? error.message : "Could not upload new version");
     } finally {
       setBusy(false);
@@ -76,7 +95,7 @@ export default function FileInspector({
     setBusy(true);
     try {
       await restoreFileVersion(file, version);
-      onMessage(`Restored v${version.version_number} as a new current version.`);
+      onMessage("Restored v" + version.version_number + " as a new current version.");
       onChanged();
       onClose();
     } catch (error) {
@@ -87,14 +106,17 @@ export default function FileInspector({
   }
 
   return (
-    <div className="inspector-overlay" role="dialog" aria-modal="true" aria-label={`${file.name} details`}>
+    <div className="inspector-overlay" role="dialog" aria-modal="true" aria-label={file.name + " details"}>
       <button className="inspector-scrim" aria-label="Close file details" onClick={onClose} />
       <aside className="file-inspector">
         <header>
           <div>
             <p className="eyebrow">File details</p>
             <h2>{file.name}</h2>
-            <span>{file.mime_type} · {formatBytes(file.size_bytes)}</span>
+            <span>
+              {file.mime_type} · {formatBytes(file.size_bytes)}
+              {file.storage_provider === "r2" ? " · R2" : ""}
+            </span>
           </div>
           <button className="icon-button" onClick={onClose}><X size={17} /></button>
         </header>
@@ -102,10 +124,14 @@ export default function FileInspector({
         <section className="inspector-summary">
           <div><span>Current version</span><strong>v{file.current_version}</strong></div>
           <div><span>AI status</span><strong className="capitalize">{file.status}</strong></div>
-          <div><span>Added</span><strong>{new Date(file.created_at).toLocaleDateString()}</strong></div>
+          <div><span>Storage</span><strong>{file.storage_provider.toUpperCase()}</strong></div>
         </section>
 
-        <button className="primary-button inspector-replace" disabled={busy} onClick={() => picker.current?.click()}>
+        <button
+          className="primary-button inspector-replace"
+          disabled={busy}
+          onClick={() => picker.current?.click()}
+        >
           <RefreshCcw size={15} /> {busy ? "Working…" : "Upload new version"}
         </button>
         <input ref={picker} hidden type="file" onChange={replace} />
@@ -129,12 +155,26 @@ export default function FileInspector({
           <div className="version-list">
             {versions.map((version) => (
               <div key={version.id} className="version-row">
-                <span><strong>v{version.version_number}</strong><small>{new Date(version.created_at).toLocaleString()}</small></span>
+                <span>
+                  <strong>v{version.version_number}</strong>
+                  <small>
+                    {new Date(version.created_at).toLocaleString()} ·{" "}
+                    {version.storage_provider.toUpperCase()}
+                  </small>
+                </span>
                 <div className="version-actions">
                   <span>{formatBytes(version.size_bytes)}</span>
-                  <button aria-label="Download version" onClick={() => void download(version)}><Download size={13} /></button>
+                  <button aria-label="Download version" onClick={() => void download(version)}>
+                    <Download size={13} />
+                  </button>
                   {version.version_number !== file.current_version && (
-                    <button aria-label="Restore version" disabled={busy} onClick={() => void restore(version)}><RotateCcw size={13} /></button>
+                    <button
+                      aria-label="Restore version"
+                      disabled={busy}
+                      onClick={() => void restore(version)}
+                    >
+                      <RotateCcw size={13} />
+                    </button>
                   )}
                 </div>
               </div>
@@ -142,6 +182,10 @@ export default function FileInspector({
           </div>
         </section>
       </aside>
+
+      {uploadTask && uploadProgress && (
+        <UploadDock fileName={uploadName} progress={uploadProgress} task={uploadTask} />
+      )}
     </div>
   );
 }

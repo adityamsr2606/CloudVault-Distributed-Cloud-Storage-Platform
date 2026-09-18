@@ -29,8 +29,11 @@ class Settings(BaseSettings):
     elasticsearch_index: str = "cloudvault-files"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
-    max_upload_mb: int = 100
-    default_storage_quota_mb: int = 1024
+    max_upload_mb: int = 1536
+    default_storage_quota_mb: int = 2048
+
+    otel_service_name: str = "cloudvault-api"
+    otel_exporter_otlp_endpoint: str | None = None
 
 
 @lru_cache
