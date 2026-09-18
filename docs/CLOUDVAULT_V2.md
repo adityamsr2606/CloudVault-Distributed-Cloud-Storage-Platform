@@ -10,7 +10,7 @@ measurable production behavior.
 - 1.5 GiB configurable product ceiling
 - provider abstraction between Supabase and R2
 - direct small-file uploads
-- R2 S3 multipart uploads for large files
+- B2 S3 multipart uploads for large files
 - presigned part URLs
 - pause/resume/cancel
 - browser session recovery
