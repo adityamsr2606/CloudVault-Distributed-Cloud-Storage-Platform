@@ -24,6 +24,16 @@ export type VaultFolder = {
   created_at: string;
 };
 
+export type FileVersion = {
+  id: string;
+  version_number: number;
+  storage_path: string;
+  mime_type: string;
+  size_bytes: number;
+  sha256: string | null;
+  created_at: string;
+};
+
 export type ActivityEvent = {
   id: number;
   file_id: string | null;
@@ -83,6 +93,23 @@ async function indexableText(file: File) {
   return `${file.name} ${file.type || "file"}`;
 }
 
+async function ensureNotExactDuplicate(sha256: string, excludeFileId?: string) {
+  let query = supabase
+    .from("vault_files")
+    .select("id,name")
+    .eq("sha256", sha256)
+    .is("deleted_at", null)
+    .limit(1);
+
+  if (excludeFileId) query = query.neq("id", excludeFileId);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  if (data && data.length > 0) {
+    throw new Error(`An identical file already exists: ${data[0].name}`);
+  }
+}
+
 export async function listFiles() {
   const { data, error } = await supabase
     .from("vault_files")
@@ -135,6 +162,8 @@ export async function uploadVaultFile(file: File, folderId: string | null = null
   const storagePath = `${ownerId}/${fileId}/v1/${name}`;
   const sha256 = await digestSha256(file);
 
+  await ensureNotExactDuplicate(sha256);
+
   const { error: storageError } = await supabase.storage
     .from("cloudvault-files")
     .upload(storagePath, file, { contentType: file.type || "application/octet-stream" });
@@ -181,6 +210,83 @@ export async function uploadVaultFile(file: File, folderId: string | null = null
   });
 
   return record as VaultFile;
+}
+
+export async function replaceVaultFile(current: VaultFile, replacement: File) {
+  const ownerId = await currentUserId();
+  const nextVersion = current.current_version + 1;
+  const name = safeName(replacement.name || current.name);
+  const storagePath = `${ownerId}/${current.id}/v${nextVersion}/${name}`;
+  const sha256 = await digestSha256(replacement);
+
+  await ensureNotExactDuplicate(sha256, current.id);
+
+  const { error: storageError } = await supabase.storage
+    .from("cloudvault-files")
+    .upload(storagePath, replacement, {
+      contentType: replacement.type || "application/octet-stream",
+    });
+  if (storageError) throw storageError;
+
+  const { error: versionError } = await supabase.from("file_versions").insert({
+    file_id: current.id,
+    owner_id: ownerId,
+    version_number: nextVersion,
+    storage_path: storagePath,
+    mime_type: replacement.type || "application/octet-stream",
+    size_bytes: replacement.size,
+    sha256,
+  });
+
+  if (versionError) {
+    await supabase.storage.from("cloudvault-files").remove([storagePath]);
+    throw versionError;
+  }
+
+  const { data: updated, error: updateError } = await supabase
+    .from("vault_files")
+    .update({
+      name,
+      storage_path: storagePath,
+      mime_type: replacement.type || "application/octet-stream",
+      size_bytes: replacement.size,
+      sha256,
+      current_version: nextVersion,
+      status: "uploaded",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", current.id)
+    .select("*")
+    .single();
+
+  if (updateError) throw updateError;
+
+  const text = await indexableText(replacement);
+  void supabase.functions.invoke("index-file", {
+    body: { file_id: current.id, text },
+  });
+
+  return updated as VaultFile;
+}
+
+export async function listFileVersions(fileId: string) {
+  const { data, error } = await supabase
+    .from("file_versions")
+    .select("id,version_number,storage_path,mime_type,size_bytes,sha256,created_at")
+    .eq("file_id", fileId)
+    .order("version_number", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []) as FileVersion[];
+}
+
+export async function getVersionDownloadUrl(version: FileVersion) {
+  const { data, error } = await supabase.storage
+    .from("cloudvault-files")
+    .createSignedUrl(version.storage_path, 60);
+
+  if (error) throw error;
+  return data.signedUrl;
 }
 
 export async function toggleStar(file: VaultFile) {
