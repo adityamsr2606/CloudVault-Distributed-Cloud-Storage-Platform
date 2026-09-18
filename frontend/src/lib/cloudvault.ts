@@ -461,16 +461,13 @@ export async function softDelete(fileId: string) {
 }
 
 export async function restoreFile(fileId: string) {
-  const settings = await getProductSettings();
-  const { error } = await supabase
-    .from("vault_files")
-    .update({
-      status: settings.ai_enabled ? "uploaded" : "ready",
-      deleted_at: null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", fileId);
+  const { data, error } = await supabase.rpc("restore_vault_file", {
+    p_file_id: fileId,
+  });
+
   if (error) throw error;
+  if (!data) throw new Error("Could not restore file.");
+  return data as VaultFile;
 }
 
 export async function purgeFile(fileId: string) {
