@@ -80,6 +80,23 @@ export default function AuthPage({ sessionReady }: { sessionReady: boolean }) {
         <button className="text-button" onClick={() => setMode(mode === "login" ? "register" : "login")}>
           {mode === "login" ? "Need an account? Register" : "Already registered? Sign in"}
         </button>
+        {mode === "login" && (
+          <button
+            className="text-button"
+            onClick={async () => {
+              if (!email) {
+                setMessage("Enter your email first.");
+                return;
+              }
+              const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: `${window.location.origin}/reset-password`,
+              });
+              setMessage(error ? error.message : "Password reset email sent.");
+            }}
+          >
+            Forgot password?
+          </button>
+        )}
       </section>
     </div>
   );

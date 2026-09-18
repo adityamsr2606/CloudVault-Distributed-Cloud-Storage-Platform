@@ -8,6 +8,7 @@ import ActivityPage from "./pages/ActivityPage";
 import AuthPage from "./pages/AuthPage";
 import DashboardPage from "./pages/DashboardPage";
 import IntelligencePage from "./pages/IntelligencePage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import SettingsPage from "./pages/SettingsPage";
 import ShareResolvePage from "./pages/ShareResolvePage";
 import SharedPage from "./pages/SharedPage";
@@ -43,6 +44,7 @@ export default function App() {
     <Routes>
       <Route path="/auth" element={<AuthPage sessionReady={Boolean(session)} />} />
       <Route path="/s/:token" element={<ShareResolvePage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route element={<Protected session={session} />}>
         <Route path="/app" element={<DashboardPage />} />
         <Route path="/app/vault" element={<VaultPage />} />
