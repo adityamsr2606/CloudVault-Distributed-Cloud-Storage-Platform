@@ -114,7 +114,7 @@ Deno.serve(async (req: Request) => {
     const action = String(body.action ?? "");
 
     if (action === "initiate") {
-      const provider = String(settings.large_upload_provider ?? "b2");
+      const provider = String(settings.large_upload_provider ?? "");
       const providerEnabled =
         provider === "b2"
           ? Boolean(settings.b2_enabled)
@@ -237,7 +237,7 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Upload session not found." }, 404);
     }
 
-    const sessionProvider = String(session.provider ?? "r2");
+    const sessionProvider = String(session.provider ?? "");
     const { client, bucket } = objectStore(sessionProvider);
 
     const totalParts = Math.ceil(
