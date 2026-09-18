@@ -80,7 +80,7 @@ Current product configuration:
 - default multipart parallelism: **3**
 - B2 feature flag: disabled until real credentials and CORS are configured
 
-This means the architecture and UI support the 1.5 GiB policy, but the hosted deployment must not claim that a real 1.5 GiB transfer is production-verified until R2 is connected and the end-to-end checklist in `docs/B2_SETUP.md` passes.
+This means the architecture and UI support the 1.5 GiB policy, but the hosted deployment must not claim that a real 1.5 GiB transfer is production-verified until B2 is connected and the end-to-end checklist in `docs/B2_SETUP.md` passes.
 
 Large storage capacity is also independent from AI extraction capacity. Uploading a large video or binary object does not imply that the full object is embedded or sent to a generative model.
 
@@ -239,7 +239,7 @@ Configurable settings include:
 - large-upload provider
 - multipart part size
 - multipart parallelism
-- R2 enablement
+- B2 enablement (with legacy R2 compatibility)
 - default/max share expiry
 - default/max share uses
 - semantic-search result limit
@@ -432,7 +432,7 @@ The historical `index-chunks` Edge Function URL is intentionally kept as an auth
 
 The code is complete for these paths, but the hosted deployment still needs provider-side configuration before they can be truthfully called active:
 
-- **Backblaze B2**: bucket, scoped credentials, production CORS, then `r2_enabled=true`
+- **Backblaze B2**: bucket, scoped credentials, production CORS, then `b2_enabled=true`
 - **Passkeys**: Supabase project WebAuthn/passkey configuration for the final production domain
 - **Gemini generation**: server-side API key + deployment enablement + per-user consent
 - **Supabase leaked-password protection**: Pro-plan-only control; unavailable while CloudVault keeps the free-only hosting constraint. The web UI enforces a stronger 12+ character mixed-password policy for new registrations and resets as a separate mitigation.
