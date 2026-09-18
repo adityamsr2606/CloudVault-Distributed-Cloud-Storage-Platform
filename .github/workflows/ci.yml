@@ -86,6 +86,7 @@ jobs:
 
       - name: Typecheck CloudVault v2 Edge Functions
         run: |
+          deno check supabase/functions/index-chunks/index.ts
           deno check supabase/functions/multipart-upload/index.ts
           deno check supabase/functions/object-url/index.ts
           deno check supabase/functions/purge-file/index.ts
