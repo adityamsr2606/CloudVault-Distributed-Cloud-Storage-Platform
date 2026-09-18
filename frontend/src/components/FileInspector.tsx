@@ -1,4 +1,4 @@
-import { Download, History, RefreshCcw, X } from "lucide-react";
+import { Download, History, RefreshCcw, RotateCcw, X } from "lucide-react";
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 import {
@@ -9,6 +9,7 @@ import {
   listFileVersions,
   relatedFiles,
   replaceVaultFile,
+  restoreFileVersion,
 } from "../lib/cloudvault";
 
 function formatBytes(value: number) {
@@ -39,7 +40,9 @@ export default function FileInspector({
         setVersions(nextVersions);
         setRelated(nextRelated);
       })
-      .catch((error) => onMessage(error instanceof Error ? error.message : "Could not load file intelligence"));
+      .catch((error) => {
+        onMessage(error instanceof Error ? error.message : "Could not load file intelligence");
+      });
   }, [file.id, onMessage]);
 
   async function replace(event: ChangeEvent<HTMLInputElement>) {
@@ -68,6 +71,21 @@ export default function FileInspector({
     }
   }
 
+  async function restore(version: FileVersion) {
+    if (version.version_number === file.current_version) return;
+    setBusy(true);
+    try {
+      await restoreFileVersion(file, version);
+      onMessage(`Restored v${version.version_number} as a new current version.`);
+      onChanged();
+      onClose();
+    } catch (error) {
+      onMessage(error instanceof Error ? error.message : "Could not restore version");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="inspector-overlay" role="dialog" aria-modal="true" aria-label={`${file.name} details`}>
       <button className="inspector-scrim" aria-label="Close file details" onClick={onClose} />
@@ -88,7 +106,7 @@ export default function FileInspector({
         </section>
 
         <button className="primary-button inspector-replace" disabled={busy} onClick={() => picker.current?.click()}>
-          <RefreshCcw size={15} /> {busy ? "Uploading…" : "Upload new version"}
+          <RefreshCcw size={15} /> {busy ? "Working…" : "Upload new version"}
         </button>
         <input ref={picker} hidden type="file" onChange={replace} />
 
@@ -110,10 +128,16 @@ export default function FileInspector({
           <div className="version-title"><History size={15} /><strong>Version history</strong></div>
           <div className="version-list">
             {versions.map((version) => (
-              <button key={version.id} className="version-row" onClick={() => void download(version)}>
+              <div key={version.id} className="version-row">
                 <span><strong>v{version.version_number}</strong><small>{new Date(version.created_at).toLocaleString()}</small></span>
-                <span>{formatBytes(version.size_bytes)} <Download size={13} /></span>
-              </button>
+                <div className="version-actions">
+                  <span>{formatBytes(version.size_bytes)}</span>
+                  <button aria-label="Download version" onClick={() => void download(version)}><Download size={13} /></button>
+                  {version.version_number !== file.current_version && (
+                    <button aria-label="Restore version" disabled={busy} onClick={() => void restore(version)}><RotateCcw size={13} /></button>
+                  )}
+                </div>
+              </div>
             ))}
           </div>
         </section>
