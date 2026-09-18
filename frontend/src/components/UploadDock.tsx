@@ -21,9 +21,15 @@ export default function UploadDock({
 }) {
   const active = progress.state === "uploading" || progress.state === "paused";
   const complete = progress.state === "completed";
+  const failed = progress.state === "failed";
 
   return (
-    <aside className={"upload-dock " + (complete ? "complete" : "")}>
+    <aside
+      className={
+        "upload-dock " +
+        (complete ? "complete" : failed ? "failed" : "")
+      }
+    >
       <div className="upload-dock-head">
         <div>
           <strong>{fileName}</strong>
@@ -62,11 +68,15 @@ export default function UploadDock({
         <span>
           {progress.state === "paused"
             ? "Paused"
-            : progress.state === "completing"
-              ? "Finalizing"
-              : complete
-                ? "Complete"
-                : "Uploading"}{" "}
+            : progress.state === "preparing"
+              ? "Preparing"
+              : progress.state === "completing"
+                ? "Finalizing"
+                : progress.state === "failed"
+                  ? "Failed"
+                  : complete
+                    ? "Complete"
+                    : "Uploading"}{" "}
           · {progress.percent}%
         </span>
         <span>
