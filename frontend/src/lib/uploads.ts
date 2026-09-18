@@ -1,5 +1,6 @@
 import { getProductSettings, type ProductSettings } from "../config/product";
 import { supabase } from "./supabase";
+import { chooseUploadPlan } from "./uploadPolicy";
 import { type VaultFile, replaceVaultFile, uploadVaultFile } from "./cloudvault";
 
 type ObjectProvider = "r2" | "b2";
@@ -263,12 +264,10 @@ export class CloudUploadTask {
       throw new Error("This deployment accepts files up to " + maxMb + " MB.");
     }
 
-    const useLargeObjectProvider =
-      this.file.size > this.settings.large_upload_threshold_bytes ||
-      this.settings.storage_provider !== "supabase";
+    const plan = chooseUploadPlan(this.file.size, this.settings);
+    this.provider = plan.provider;
 
-    if (!useLargeObjectProvider) {
-      this.provider = "supabase";
+    if (plan.mode === "direct") {
       this.state = "uploading";
       this.emitProgress(0);
 
@@ -281,13 +280,7 @@ export class CloudUploadTask {
       return record;
     }
 
-    const preferredProvider = this.settings.large_upload_provider;
-    this.provider =
-      preferredProvider === "b2" || preferredProvider === "r2"
-        ? preferredProvider
-        : "supabase";
-
-    return this.runMultipart(preferredProvider);
+    return this.runMultipart(plan.provider);
   }
 
   private async runMultipart(preferredProvider: string) {
