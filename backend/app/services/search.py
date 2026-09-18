@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Any
 
-from elasticsearch import Elasticsearch
+from elasticsearch import Elasticsearch, helpers
 
 from app.core.config import get_settings
 
@@ -22,6 +22,8 @@ class SearchService:
                 "properties": {
                     "file_id": {"type": "keyword"},
                     "owner_id": {"type": "keyword"},
+                    "chunk_number": {"type": "integer"},
+                    "index_version": {"type": "keyword"},
                     "name": {"type": "text"},
                     "content": {"type": "text"},
                     "mime_type": {"type": "keyword"},
@@ -35,13 +37,29 @@ class SearchService:
             },
         )
 
-    def index_document(self, document_id: str, body: dict[str, Any]) -> None:
-        self.client.index(
+    def replace_file_chunks(
+        self,
+        file_id: str,
+        chunks: list[dict[str, Any]],
+    ) -> None:
+        self.client.delete_by_query(
             index=self.index,
-            id=document_id,
-            document=body,
-            refresh=False,
+            query={"term": {"file_id": file_id}},
+            conflicts="proceed",
+            refresh=True,
         )
+        if not chunks:
+            return
+
+        actions = [
+            {
+                "_index": self.index,
+                "_id": f"{file_id}:{chunk['chunk_number']}",
+                "_source": chunk,
+            }
+            for chunk in chunks
+        ]
+        helpers.bulk(self.client, actions, refresh=True)
 
     def hybrid_search(
         self,
@@ -53,6 +71,7 @@ class SearchService:
         response = self.client.search(
             index=self.index,
             size=limit,
+            collapse={"field": "file_id"},
             query={
                 "bool": {
                     "should": [
@@ -70,8 +89,8 @@ class SearchService:
             knn={
                 "field": "embedding",
                 "query_vector": vector,
-                "k": limit,
-                "num_candidates": max(50, limit * 5),
+                "k": max(limit * 3, 20),
+                "num_candidates": max(100, limit * 10),
                 "filter": {"term": {"owner_id": owner_id}},
             },
         )
