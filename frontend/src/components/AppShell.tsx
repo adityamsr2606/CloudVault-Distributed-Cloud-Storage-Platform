@@ -75,7 +75,17 @@ export default function AppShell() {
       <section className="workspace">
         <header className="workspace-bar">
           <CommandPalette />
-          <ThemeSwitcher compact />
+          <div className="workspace-actions">
+            <ThemeSwitcher compact />
+            <button
+              className="icon-button mobile-signout"
+              onClick={logout}
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
         </header>
 
         <main className="content-stage">
