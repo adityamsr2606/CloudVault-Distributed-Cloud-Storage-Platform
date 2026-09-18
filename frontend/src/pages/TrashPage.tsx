@@ -41,8 +41,27 @@ export default function TrashPage() {
     try {
       await restoreFile(id);
       setMessage("File restored.");
+      await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Restore failed");
+    }
+  }
+
+  async function restoreFolderItem(folder: VaultFolder) {
+    try {
+      const result = await restoreFolder(folder.id);
+      setMessage(
+        'Restored "' +
+          folder.name +
+          '" with ' +
+          result.filesRestored +
+          " file" +
+          (result.filesRestored === 1 ? "" : "s") +
+          ".",
+      );
+      await refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Folder restore failed");
     }
   }
 
@@ -60,35 +79,18 @@ export default function TrashPage() {
     try {
       await purgeFile(file.id);
       setMessage("File and all stored versions permanently deleted.");
+      await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Permanent delete failed");
-    }
-  }
-
-  async function restoreFolderItem(folder: VaultFolder) {
-    try {
-      const result = await restoreFolder(folder.id);
-      setMessage(
-        'Restored "' +
-          folder.name +
-          '" with ' +
-          result.filesRestored +
-          ' file' +
-          (result.filesRestored === 1 ? "" : "s") +
-          ".",
-      );
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Folder restore failed");
     }
   }
 
   async function purgeFolderItem(folder: VaultFolder) {
     if (
       !window.confirm(
-        'Permanently delete "' +
+        'Permanently delete the folder "' +
           folder.name +
-          '" and all files/subfolders that were moved to Trash with it? ' +
-          "This cannot be undone.",
+          '" plus every file, subfolder and stored version inside it? This cannot be undone.',
       )
     ) {
       return;
@@ -97,18 +99,19 @@ export default function TrashPage() {
     try {
       const result = await purgeFolder(folder.id);
       setMessage(
-        'Permanently deleted "' +
-          folder.name +
-          '" and ' +
+        'Folder permanently deleted with ' +
           Number(result.files_deleted ?? 0) +
-          ' file' +
+          " file" +
           (Number(result.files_deleted ?? 0) === 1 ? "" : "s") +
           ".",
       );
+      await refresh();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Folder purge failed");
     }
   }
+
+  const empty = files.length === 0 && folders.length === 0;
 
   return (
     <div className="page-wrap">
@@ -117,8 +120,7 @@ export default function TrashPage() {
           <p className="eyebrow">Recovery</p>
           <h1>Trash</h1>
           <p>
-            Restore folders as complete units, restore individual files, or permanently
-            delete storage objects and version history.
+            Restore deleted files and folders, or permanently remove their stored versions.
           </p>
         </div>
       </header>
@@ -126,11 +128,11 @@ export default function TrashPage() {
       {message && <div className="inline-message">{message}</div>}
 
       {folders.length > 0 && (
-        <section className="table-card">
+        <section className="table-card trash-section">
           <div className="section-head">
             <div>
               <p className="eyebrow">Folders</p>
-              <h2>{folders.length} trashed folder{folders.length === 1 ? "" : "s"}</h2>
+              <h2>{folders.length} deleted</h2>
             </div>
           </div>
 
@@ -169,49 +171,51 @@ export default function TrashPage() {
         </section>
       )}
 
-      <section className="table-card">
-        <div className="section-head">
-          <div>
-            <p className="eyebrow">Files</p>
-            <h2>{files.length} trashed file{files.length === 1 ? "" : "s"}</h2>
-          </div>
-        </div>
-
-        <div className="file-list">
-          {files.map((file) => (
-            <div className="file-row" key={file.id}>
-              <div className="file-glyph">{file.name.slice(0, 1).toUpperCase()}</div>
-              <div className="file-main">
-                <strong>{file.name}</strong>
-                <span>
-                  Deleted{" "}
-                  {file.deleted_at
-                    ? new Date(file.deleted_at).toLocaleString()
-                    : ""}
-                </span>
-              </div>
-              <div className="trash-actions">
-                <button
-                  className="ghost-button compact"
-                  onClick={() => void restoreFileItem(file.id)}
-                >
-                  <RotateCcw size={15} /> Restore
-                </button>
-                <button
-                  className="danger-button compact"
-                  onClick={() => void purgeFileItem(file)}
-                >
-                  <Trash2 size={15} /> Delete forever
-                </button>
-              </div>
+      {files.length > 0 && (
+        <section className="table-card trash-section">
+          <div className="section-head">
+            <div>
+              <p className="eyebrow">Files</p>
+              <h2>{files.length} deleted</h2>
             </div>
-          ))}
+          </div>
 
-          {files.length === 0 && folders.length === 0 && (
-            <div className="empty-state">Trash is empty.</div>
-          )}
-        </div>
-      </section>
+          <div className="file-list">
+            {files.map((file) => (
+              <div className="file-row" key={file.id}>
+                <div className="file-glyph">{file.name.slice(0, 1).toUpperCase()}</div>
+                <div className="file-main">
+                  <strong>{file.name}</strong>
+                  <span>
+                    Deleted{" "}
+                    {file.deleted_at ? new Date(file.deleted_at).toLocaleString() : ""}
+                  </span>
+                </div>
+                <div className="trash-actions">
+                  <button
+                    className="ghost-button compact"
+                    onClick={() => void restoreFileItem(file.id)}
+                  >
+                    <RotateCcw size={15} /> Restore
+                  </button>
+                  <button
+                    className="danger-button compact"
+                    onClick={() => void purgeFileItem(file)}
+                  >
+                    <Trash2 size={15} /> Delete forever
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {empty && (
+        <section className="table-card">
+          <div className="empty-state">Trash is empty.</div>
+        </section>
+      )}
     </div>
   );
 }
