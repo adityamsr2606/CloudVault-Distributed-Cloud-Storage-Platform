@@ -163,3 +163,23 @@ Do not call 1.5 GiB uploads production-verified until all of these pass:
 10. Move the file/folder to Trash and restore it.
 11. Permanently purge the file/folder and verify all B2 versions are gone.
 12. Complete an actual file upload of at least 1.5 GB / the configured 1.5 GiB ceiling.
+
+
+## Completion recovery
+
+Multipart completion is designed to recover from the boundary between object storage and
+PostgreSQL.
+
+CloudVault now:
+
+- records the provider on every multipart session
+- resumes a session against that recorded provider even if the product default changes later
+- validates an exact 1..N part set before completion
+- uses a provider HEAD check when ListParts or completion reports that the multipart upload no longer exists
+- atomically finalizes the file, immutable version, and multipart-session status in PostgreSQL
+- treats an already-finalized session as idempotently complete
+- keeps browser resume keys scoped by folder/replacement context to avoid collisions between identical local files
+
+This means a network interruption after B2 finishes the object but before the browser sees
+the response can be repaired on the next status/completion attempt instead of creating a
+second upload or leaving inconsistent metadata.

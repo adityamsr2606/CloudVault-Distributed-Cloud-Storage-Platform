@@ -605,3 +605,192 @@ $$;
 
 revoke all on function public.restore_vault_file(uuid) from public, anon;
 grant execute on function public.restore_vault_file(uuid) to authenticated;
+
+
+-- Atomically finalize multipart metadata after the object provider completes.
+-- Security invoker keeps the same owner-scoped RLS boundary as normal file writes.
+create or replace function public.finalize_multipart_upload(
+  p_session_id uuid,
+  p_should_index boolean
+)
+returns public.vault_files
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+declare
+  v_owner uuid := (select auth.uid());
+  v_session public.multipart_uploads%rowtype;
+  v_file public.vault_files%rowtype;
+  v_versioning boolean := true;
+  v_status text := case when p_should_index then 'uploaded' else 'ready' end;
+begin
+  if v_owner is null then
+    raise exception 'Authentication required';
+  end if;
+
+  select *
+  into v_session
+  from public.multipart_uploads
+  where id = p_session_id
+    and owner_id = v_owner
+  for update;
+
+  if not found then
+    raise exception 'Upload session not found';
+  end if;
+
+  if v_session.status in ('aborted', 'failed') then
+    raise exception 'Upload session is not finalizable';
+  end if;
+
+  if v_session.status = 'completed' then
+    select *
+    into v_file
+    from public.vault_files
+    where id = v_session.file_id
+      and owner_id = v_owner;
+
+    if not found then
+      raise exception 'Completed upload metadata is missing';
+    end if;
+
+    return v_file;
+  end if;
+
+  select versioning_enabled
+  into v_versioning
+  from public.product_settings
+  where id = 'default';
+
+  if v_session.replaces_file_id is not null then
+    if coalesce(v_versioning, true) then
+      insert into public.file_versions (
+        file_id,
+        owner_id,
+        version_number,
+        storage_path,
+        storage_provider,
+        mime_type,
+        size_bytes,
+        sha256
+      )
+      values (
+        v_session.file_id,
+        v_owner,
+        v_session.version_number,
+        v_session.object_key,
+        v_session.provider,
+        v_session.mime_type,
+        v_session.size_bytes,
+        null
+      )
+      on conflict (file_id, version_number) do nothing;
+    end if;
+
+    update public.vault_files
+    set
+      name = v_session.file_name,
+      storage_path = v_session.object_key,
+      storage_provider = v_session.provider,
+      mime_type = v_session.mime_type,
+      size_bytes = v_session.size_bytes,
+      sha256 = null,
+      current_version = v_session.version_number,
+      status = v_status,
+      updated_at = now()
+    where id = v_session.file_id
+      and owner_id = v_owner
+      and deleted_at is null
+    returning * into v_file;
+
+    if not found then
+      raise exception 'File to replace was not found';
+    end if;
+  else
+    insert into public.vault_files (
+      id,
+      owner_id,
+      folder_id,
+      name,
+      storage_path,
+      storage_provider,
+      mime_type,
+      size_bytes,
+      sha256,
+      current_version,
+      status
+    )
+    values (
+      v_session.file_id,
+      v_owner,
+      v_session.folder_id,
+      v_session.file_name,
+      v_session.object_key,
+      v_session.provider,
+      v_session.mime_type,
+      v_session.size_bytes,
+      null,
+      v_session.version_number,
+      v_status
+    )
+    on conflict (id) do update
+    set
+      name = excluded.name,
+      storage_path = excluded.storage_path,
+      storage_provider = excluded.storage_provider,
+      mime_type = excluded.mime_type,
+      size_bytes = excluded.size_bytes,
+      sha256 = excluded.sha256,
+      current_version = excluded.current_version,
+      status = excluded.status,
+      updated_at = now()
+    where public.vault_files.owner_id = v_owner
+    returning * into v_file;
+
+    if not found then
+      raise exception 'Could not finalize file metadata';
+    end if;
+
+    if coalesce(v_versioning, true) then
+      insert into public.file_versions (
+        file_id,
+        owner_id,
+        version_number,
+        storage_path,
+        storage_provider,
+        mime_type,
+        size_bytes,
+        sha256
+      )
+      values (
+        v_session.file_id,
+        v_owner,
+        v_session.version_number,
+        v_session.object_key,
+        v_session.provider,
+        v_session.mime_type,
+        v_session.size_bytes,
+        null
+      )
+      on conflict (file_id, version_number) do nothing;
+    end if;
+  end if;
+
+  update public.multipart_uploads
+  set
+    status = 'completed',
+    completed_at = coalesce(completed_at, now()),
+    updated_at = now()
+  where id = v_session.id
+    and owner_id = v_owner;
+
+  return v_file;
+end;
+$$;
+
+revoke all on function public.finalize_multipart_upload(uuid, boolean)
+from public, anon;
+
+grant execute on function public.finalize_multipart_upload(uuid, boolean)
+to authenticated;

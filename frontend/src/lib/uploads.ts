@@ -2,6 +2,10 @@ import { getProductSettings, type ProductSettings } from "../config/product";
 import { supabase } from "./supabase";
 import { type VaultFile, replaceVaultFile, uploadVaultFile } from "./cloudvault";
 
+type ObjectProvider = "r2" | "b2";
+type StorageProvider = "supabase" | ObjectProvider;
+type MultipartState = "initiated" | "uploading" | "completed" | "aborted" | "failed";
+
 export type UploadState =
   | "preparing"
   | "uploading"
@@ -13,7 +17,7 @@ export type UploadState =
 
 export type UploadProgress = {
   state: UploadState;
-  provider: "supabase" | "r2" | "b2";
+  provider: StorageProvider;
   loadedBytes: number;
   totalBytes: number;
   percent: number;
@@ -30,15 +34,18 @@ type PartRecord = {
 type MultipartSession = {
   session_id: string;
   file_id: string;
+  provider: ObjectProvider;
   part_size_bytes: number;
   total_parts: number;
 };
 
 type MultipartStatus = MultipartSession & {
+  status: MultipartState;
   parts: PartRecord[];
+  file?: VaultFile;
 };
 
-function uploadKey(file: File) {
+function legacyUploadKey(file: File) {
   return "cloudvault-upload:" + file.name + ":" + file.size + ":" + file.lastModified;
 }
 
@@ -94,7 +101,7 @@ export class CloudUploadTask {
   private partProgress = new Map<number, number>();
   private completedParts = new Map<number, PartRecord>();
   private state: UploadState = "preparing";
-  private provider: "supabase" | "r2" | "b2" = "supabase";
+  private provider: StorageProvider = "supabase";
   private totalParts = 1;
 
   constructor(
@@ -108,8 +115,10 @@ export class CloudUploadTask {
 
   pause() {
     if (this.state !== "uploading" || this.provider === "supabase") return;
+
     this.paused = true;
     this.state = "paused";
+
     for (const request of this.activeRequests) request.abort();
     this.activeRequests.clear();
     this.emitProgress();
@@ -117,6 +126,7 @@ export class CloudUploadTask {
 
   resume() {
     if (!this.paused || this.cancelled) return;
+
     this.paused = false;
     this.state = "uploading";
     this.resumeResolver?.();
@@ -133,6 +143,7 @@ export class CloudUploadTask {
 
     for (const request of this.activeRequests) request.abort();
     this.activeRequests.clear();
+
     this.resumeResolver?.();
     this.resumeResolver = null;
 
@@ -140,18 +151,92 @@ export class CloudUploadTask {
       try {
         await invokeMultipart({ action: "abort", session_id: this.sessionId });
       } catch {
-        // Cancellation stays local even if provider cleanup fails.
+        // Local cancellation still stops browser traffic if provider cleanup fails.
       }
     }
 
-    localStorage.removeItem(uploadKey(this.file));
+    this.clearStoredSession();
     this.emitProgress();
+  }
+
+  private storageKey() {
+    const context = [
+      this.replaceFile?.id ?? "new",
+      this.folderId ?? "root",
+      this.file.name,
+      String(this.file.size),
+      String(this.file.lastModified),
+    ]
+      .map((value) => encodeURIComponent(value))
+      .join(":");
+
+    return "cloudvault-upload:v2:" + context;
+  }
+
+  private readStoredSession() {
+    const primaryKey = this.storageKey();
+    const primary = safeJsonParse<{ session_id: string }>(
+      localStorage.getItem(primaryKey),
+    );
+
+    if (primary?.session_id) return primary;
+
+    const legacyKey = legacyUploadKey(this.file);
+    const legacy = safeJsonParse<{ session_id: string }>(
+      localStorage.getItem(legacyKey),
+    );
+
+    if (legacy?.session_id) {
+      localStorage.setItem(primaryKey, JSON.stringify(legacy));
+      localStorage.removeItem(legacyKey);
+      return legacy;
+    }
+
+    return null;
+  }
+
+  private storeSession(sessionId: string) {
+    localStorage.setItem(
+      this.storageKey(),
+      JSON.stringify({ session_id: sessionId }),
+    );
+  }
+
+  private clearStoredSession() {
+    localStorage.removeItem(this.storageKey());
+    localStorage.removeItem(legacyUploadKey(this.file));
+  }
+
+  private providerEnabled(provider: string) {
+    if (!this.settings) return false;
+    if (provider === "b2") return this.settings.b2_enabled;
+    if (provider === "r2") return this.settings.r2_enabled;
+    return false;
+  }
+
+  private providerLabel(provider: string) {
+    if (provider === "b2") return "Backblaze B2";
+    if (provider === "r2") return "Cloudflare R2";
+    return provider.toUpperCase();
+  }
+
+  private markRecoveredComplete(totalParts: number) {
+    this.completedParts.clear();
+    this.partProgress.clear();
+
+    for (let partNumber = 1; partNumber <= totalParts; partNumber += 1) {
+      this.completedParts.set(partNumber, {
+        part_number: partNumber,
+        etag: "recovered",
+      });
+    }
   }
 
   private async run() {
     this.settings = await getProductSettings();
 
     if (this.file.size <= 0) throw new Error("Empty files are not accepted.");
+
     if (this.file.size > this.settings.max_upload_bytes) {
       const maxMb = Math.round(this.settings.max_upload_bytes / 1024 / 1024);
       throw new Error("This deployment accepts files up to " + maxMb + " MB.");
@@ -175,37 +260,17 @@ export class CloudUploadTask {
       return record;
     }
 
-    const provider = this.settings.large_upload_provider;
-    const providerEnabled =
-      provider === "b2"
-        ? this.settings.b2_enabled
-        : provider === "r2"
-          ? this.settings.r2_enabled
-          : false;
+    const preferredProvider = this.settings.large_upload_provider;
+    this.provider =
+      preferredProvider === "b2" || preferredProvider === "r2"
+        ? preferredProvider
+        : "supabase";
 
-    if (!providerEnabled || provider === "supabase") {
-      const directMb = Math.round(
-        this.settings.supabase_direct_upload_max_bytes / 1024 / 1024,
-      );
-      throw new Error(
-        "Large-file storage is configured for " +
-          (provider === "b2" ? "Backblaze B2" : provider.toUpperCase()) +
-          " but that provider is not connected yet. " +
-          "The active Supabase provider currently supports uploads up to " +
-          directMb +
-          " MB.",
-      );
-    }
-
-    this.provider = provider;
-    return this.runMultipart();
+    return this.runMultipart(preferredProvider);
   }
 
-  private async runMultipart() {
-    const stored = safeJsonParse<{ session_id: string }>(
-      localStorage.getItem(uploadKey(this.file)),
-    );
-
+  private async runMultipart(preferredProvider: string) {
+    const stored = this.readStoredSession();
     let session: MultipartStatus | null = null;
 
     if (stored?.session_id) {
@@ -214,12 +279,59 @@ export class CloudUploadTask {
           action: "status",
           session_id: stored.session_id,
         });
+
+        this.sessionId = session.session_id;
+        this.totalParts = session.total_parts;
+        this.provider = session.provider;
+
+        if (session.status === "completed") {
+          if (!session.file) {
+            throw new Error("Recovered upload is missing its finalized file metadata.");
+          }
+
+          this.markRecoveredComplete(session.total_parts);
+          this.clearStoredSession();
+
+          if (session.file.status === "uploaded") {
+            await maybeIndex(this.file, session.file.id, this.settings!);
+          }
+
+          this.state = "completed";
+          this.emitProgress(this.file.size);
+          return session.file;
+        }
+
+        if (session.status === "aborted" || session.status === "failed") {
+          this.clearStoredSession();
+          session = null;
+          this.sessionId = null;
+        }
       } catch {
-        localStorage.removeItem(uploadKey(this.file));
+        this.clearStoredSession();
+        session = null;
+        this.sessionId = null;
       }
     }
 
     if (!session) {
+      if (
+        (preferredProvider !== "b2" && preferredProvider !== "r2") ||
+        !this.providerEnabled(preferredProvider)
+      ) {
+        const directMb = Math.round(
+          this.settings!.supabase_direct_upload_max_bytes / 1024 / 1024,
+        );
+
+        throw new Error(
+          "Large-file storage is configured for " +
+            this.providerLabel(preferredProvider) +
+            " but that provider is not connected yet. " +
+            "The active Supabase provider currently supports uploads up to " +
+            directMb +
+            " MB.",
+        );
+      }
+
       const initiated = await invokeMultipart<MultipartSession>({
         action: "initiate",
         file_name: this.file.name,
@@ -231,29 +343,32 @@ export class CloudUploadTask {
 
       this.sessionId = initiated.session_id;
       this.totalParts = initiated.total_parts;
-      localStorage.setItem(
-        uploadKey(this.file),
-        JSON.stringify({ session_id: initiated.session_id }),
-      );
+      this.provider = initiated.provider;
+      this.storeSession(initiated.session_id);
 
       session = {
         ...initiated,
+        status: "initiated",
         parts: [],
       };
     }
 
     this.sessionId = session.session_id;
     this.totalParts = session.total_parts;
+    this.provider = session.provider;
 
     for (const part of session.parts ?? []) {
       this.completedParts.set(part.part_number, part);
+
       const start = (part.part_number - 1) * session.part_size_bytes;
       const size = Math.min(session.part_size_bytes, this.file.size - start);
       this.partProgress.set(part.part_number, Math.max(size, 0));
     }
 
-    const missing = Array.from({ length: this.totalParts }, (_, index) => index + 1)
-      .filter((partNumber) => !this.completedParts.has(partNumber));
+    const missing = Array.from(
+      { length: this.totalParts },
+      (_, index) => index + 1,
+    ).filter((partNumber) => !this.completedParts.has(partNumber));
 
     this.state = "uploading";
     this.emitProgress();
@@ -279,8 +394,9 @@ export class CloudUploadTask {
     };
 
     await Promise.all(
-      Array.from({ length: Math.min(parallelism, Math.max(missing.length, 1)) }, () =>
-        worker(),
+      Array.from(
+        { length: Math.min(parallelism, Math.max(missing.length, 1)) },
+        () => worker(),
       ),
     );
 
@@ -300,11 +416,12 @@ export class CloudUploadTask {
         })),
     });
 
-    localStorage.removeItem(uploadKey(this.file));
+    this.clearStoredSession();
     await maybeIndex(this.file, completed.file.id, this.settings!);
 
     this.state = "completed";
     this.emitProgress(this.file.size);
+
     return completed.file;
   }
 
@@ -331,6 +448,7 @@ export class CloudUploadTask {
         const blob = this.file.slice(start, end);
 
         const etag = await this.putPart(entry.url, blob, partNumber);
+
         this.completedParts.set(partNumber, {
           part_number: partNumber,
           etag,
@@ -341,6 +459,7 @@ export class CloudUploadTask {
         return;
       } catch (error) {
         if (this.cancelled) throw new Error("Upload cancelled.");
+
         if (this.paused) {
           this.partProgress.set(partNumber, 0);
           continue;
@@ -351,7 +470,10 @@ export class CloudUploadTask {
         this.emitProgress();
 
         if (attempts >= 4) throw error;
-        await new Promise((resolve) => window.setTimeout(resolve, 400 * 2 ** attempts));
+
+        await new Promise((resolve) =>
+          window.setTimeout(resolve, 400 * 2 ** attempts),
+        );
       }
     }
 
@@ -364,6 +486,7 @@ export class CloudUploadTask {
       this.activeRequests.add(request);
 
       request.open("PUT", url);
+
       request.upload.onprogress = (event) => {
         if (event.lengthComputable) {
           this.partProgress.set(partNumber, event.loaded);
@@ -375,7 +498,11 @@ export class CloudUploadTask {
         this.activeRequests.delete(request);
 
         if (request.status < 200 || request.status >= 300) {
-          reject(new Error("Part " + partNumber + " failed with HTTP " + request.status + "."));
+          reject(
+            new Error(
+              "Part " + partNumber + " failed with HTTP " + request.status + ".",
+            ),
+          );
           return;
         }
 
@@ -418,6 +545,7 @@ export class CloudUploadTask {
     const loaded =
       forceLoaded ??
       [...this.partProgress.values()].reduce((sum, value) => sum + value, 0);
+
     const bounded = Math.min(Math.max(loaded, 0), this.file.size);
 
     this.onProgress({
@@ -425,7 +553,9 @@ export class CloudUploadTask {
       provider: this.provider,
       loadedBytes: bounded,
       totalBytes: this.file.size,
-      percent: this.file.size > 0 ? Math.round((bounded / this.file.size) * 100) : 0,
+      percent: this.file.size > 0
+        ? Math.round((bounded / this.file.size) * 100)
+        : 0,
       uploadedParts: this.completedParts.size,
       totalParts: this.totalParts,
     });
@@ -439,7 +569,6 @@ export function startVaultUpload(
 ) {
   return new CloudUploadTask(file, folderId, onProgress);
 }
-
 
 export function startVaultReplacement(
   file: File,

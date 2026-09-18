@@ -18,6 +18,11 @@ measurable production behavior.
 - configurable 5 MiB+ part sizing
 - configurable upload parallelism
 - retry/backoff per failed part
+- provider-recorded resume sessions across provider-default changes
+- exact multipart part validation
+- provider HEAD-based completion recovery after interrupted responses
+- atomic multipart metadata finalization in PostgreSQL
+- idempotent completed-session recovery
 - version replacements through the same multipart engine
 - provider-aware download, sharing and purge
 
