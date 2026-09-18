@@ -127,9 +127,10 @@ Deno.serve(async (req: Request) => {
     if (objectPaths.length > 0) {
       const providers = new Map<string, string[]>();
       for (const entry of entries.filter((item) => item.storage_provider !== "supabase")) {
-        const list = providers.get(String(entry.storage_provider)) ?? [];
+        const provider = String(entry.storage_provider);
+        const list = providers.get(provider) ?? [];
         list.push(String(entry.storage_path));
-        providers.set(String(entry.storage_provider), list);
+        providers.set(provider, list);
       }
 
       for (const [provider, paths] of providers) {
@@ -144,17 +145,6 @@ Deno.serve(async (req: Request) => {
           }),
         );
       }
-
-      return json({ ok: true });
-      await client.send(
-        new DeleteObjectsCommand({
-          Bucket: bucket,
-          Delete: {
-            Objects: objectPaths.map((Key) => ({ Key })),
-            Quiet: true,
-          },
-        }),
-      );
     }
 
     const { error: deleteError } = await supabase
