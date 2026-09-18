@@ -89,6 +89,7 @@ jobs:
           deno check supabase/functions/multipart-upload/index.ts
           deno check supabase/functions/object-url/index.ts
           deno check supabase/functions/purge-file/index.ts
+          deno check supabase/functions/purge-folder/index.ts
           deno check supabase/functions/restore-version/index.ts
           deno check supabase/functions/semantic-search/index.ts
           deno check supabase/functions/grounded-answer/index.ts
