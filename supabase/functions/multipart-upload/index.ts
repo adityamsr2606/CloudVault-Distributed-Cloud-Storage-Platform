@@ -4,6 +4,7 @@ import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
+  HeadObjectCommand,
   ListPartsCommand,
   S3Client,
   UploadPartCommand,
@@ -84,6 +85,64 @@ function textLike(name: string, mimeType: string) {
   );
 }
 
+function shouldIndexSession(
+  settings: Record<string, unknown>,
+  session: Record<string, unknown>,
+) {
+  return (
+    Boolean(settings.ai_enabled) &&
+    Number(session.size_bytes) <= Number(settings.max_indexable_text_bytes) &&
+    textLike(String(session.file_name ?? ""), String(session.mime_type ?? ""))
+  );
+}
+
+async function objectExists(
+  client: S3Client,
+  bucket: string,
+  key: string,
+) {
+  try {
+    await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeParts(
+  rawParts: unknown,
+  totalParts: number,
+) {
+  if (!Array.isArray(rawParts) || rawParts.length !== totalParts) {
+    throw new Error("Every uploaded part must be supplied before completion.");
+  }
+
+  const parts = rawParts
+    .map((value) => {
+      const part = value as Record<string, unknown>;
+      return {
+        PartNumber: Number(part.part_number),
+        ETag: String(part.etag ?? "").trim(),
+      };
+    })
+    .sort((a, b) => a.PartNumber - b.PartNumber);
+
+  const valid =
+    parts.length === totalParts &&
+    parts.every(
+      (part, index) =>
+        Number.isInteger(part.PartNumber) &&
+        part.PartNumber === index + 1 &&
+        part.ETag.length > 0,
+    );
+
+  if (!valid) {
+    throw new Error("Multipart completion data is incomplete or invalid.");
+  }
+
+  return parts;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -108,7 +167,9 @@ Deno.serve(async (req: Request) => {
       .eq("id", "default")
       .single();
 
-    if (settingsError || !settings) throw settingsError ?? new Error("Missing product settings");
+    if (settingsError || !settings) {
+      throw settingsError ?? new Error("Missing product settings");
+    }
 
     const body = await req.json();
     const action = String(body.action ?? "");
@@ -164,6 +225,9 @@ Deno.serve(async (req: Request) => {
       const partSize = Number(settings.multipart_part_size_bytes);
       const totalParts = Math.ceil(sizeBytes / partSize);
 
+      if (!Number.isFinite(partSize) || partSize <= 0 || totalParts <= 0) {
+        return json({ error: "Invalid multipart configuration." }, 500);
+      }
       if (totalParts > 10_000) {
         return json({ error: "Configured part size would exceed the provider part-count limit." }, 400);
       }
@@ -183,7 +247,9 @@ Deno.serve(async (req: Request) => {
         }),
       );
 
-      if (!initiated.UploadId) throw new Error("The object store did not return an upload id.");
+      if (!initiated.UploadId) {
+        throw new Error("The object store did not return an upload id.");
+      }
 
       const { data: session, error: sessionError } = await supabase
         .from("multipart_uploads")
@@ -202,7 +268,7 @@ Deno.serve(async (req: Request) => {
           replaces_file_id: replaceFileId,
           status: "initiated",
         })
-        .select("id,file_id,part_size_bytes")
+        .select("id,file_id,part_size_bytes,provider")
         .single();
 
       if (sessionError) {
@@ -219,6 +285,7 @@ Deno.serve(async (req: Request) => {
       return json({
         session_id: session.id,
         file_id: session.file_id,
+        provider: session.provider,
         part_size_bytes: session.part_size_bytes,
         total_parts: totalParts,
       });
@@ -238,21 +305,99 @@ Deno.serve(async (req: Request) => {
     }
 
     const sessionProvider = String(session.provider ?? "");
-    const { client, bucket } = objectStore(sessionProvider);
-
     const totalParts = Math.ceil(
       Number(session.size_bytes) / Number(session.part_size_bytes),
     );
+
+    const completedPayload = async () => {
+      const { data: file, error: fileError } = await supabase
+        .from("vault_files")
+        .select("*")
+        .eq("id", session.file_id)
+        .single();
+
+      if (fileError || !file) {
+        throw fileError ?? new Error("Completed upload metadata is missing.");
+      }
+
+      return {
+        session_id: session.id,
+        file_id: session.file_id,
+        provider: sessionProvider,
+        part_size_bytes: session.part_size_bytes,
+        total_parts: totalParts,
+        status: "completed",
+        parts: [],
+        file,
+      };
+    };
+
+    if (session.status === "completed") {
+      if (action === "abort") {
+        return json({ ok: true, status: "completed" });
+      }
+      if (action === "status" || action === "complete") {
+        return json(await completedPayload());
+      }
+      return json({ error: "Upload session is already completed." }, 409);
+    }
+
+    if (session.status === "aborted" || session.status === "failed") {
+      if (action === "status") {
+        return json({
+          session_id: session.id,
+          file_id: session.file_id,
+          provider: sessionProvider,
+          part_size_bytes: session.part_size_bytes,
+          total_parts: totalParts,
+          status: session.status,
+          parts: [],
+        });
+      }
+      if (action === "abort") {
+        return json({ ok: true, status: session.status });
+      }
+      return json({ error: "Upload session is no longer active." }, 409);
+    }
+
+    const { client, bucket } = objectStore(sessionProvider);
+
+    const finalizeMetadata = async () => {
+      const shouldIndex = shouldIndexSession(
+        settings as Record<string, unknown>,
+        session as Record<string, unknown>,
+      );
+
+      const { data, error } = await supabase.rpc("finalize_multipart_upload", {
+        p_session_id: session.id,
+        p_should_index: shouldIndex,
+      });
+
+      if (error) throw error;
+
+      const file = Array.isArray(data) ? data[0] : data;
+      if (!file) throw new Error("Multipart metadata finalization returned no file.");
+
+      return { file, shouldIndex };
+    };
 
     if (action === "sign_parts") {
       const numbers: number[] = Array.isArray(body.part_numbers)
         ? body.part_numbers.map((value: unknown) => Number(value))
         : [];
+
       if (numbers.length === 0 || numbers.length > 8) {
         return json({ error: "Request between 1 and 8 part numbers." }, 400);
       }
-      if (numbers.some((part) => !Number.isInteger(part) || part < 1 || part > totalParts)) {
-        return json({ error: "Invalid part number." }, 400);
+
+      const uniqueNumbers = [...new Set(numbers)];
+      if (
+        uniqueNumbers.length !== numbers.length ||
+        numbers.some(
+          (part) => !Number.isInteger(part) || part < 1 || part > totalParts,
+        )
+      ) {
+        return json({ error: "Invalid or duplicate part number." }, 400);
       }
 
       const urls = await Promise.all(
@@ -285,34 +430,52 @@ Deno.serve(async (req: Request) => {
       const parts: Array<{ part_number: number; etag: string; size: number }> = [];
       let marker: string | undefined;
 
-      do {
-        const listed = await client.send(
-          new ListPartsCommand({
-            Bucket: bucket,
-            Key: session.object_key,
-            UploadId: session.provider_upload_id,
-            PartNumberMarker: marker,
-          }),
-        );
+      try {
+        do {
+          const listed = await client.send(
+            new ListPartsCommand({
+              Bucket: bucket,
+              Key: session.object_key,
+              UploadId: session.provider_upload_id,
+              PartNumberMarker: marker,
+            }),
+          );
 
-        for (const part of listed.Parts ?? []) {
-          if (part.PartNumber && part.ETag) {
-            parts.push({
-              part_number: part.PartNumber,
-              etag: part.ETag,
-              size: Number(part.Size ?? 0),
-            });
+          for (const part of listed.Parts ?? []) {
+            if (part.PartNumber && part.ETag) {
+              parts.push({
+                part_number: part.PartNumber,
+                etag: part.ETag,
+                size: Number(part.Size ?? 0),
+              });
+            }
           }
-        }
 
-        marker = listed.IsTruncated
-          ? String(listed.NextPartNumberMarker ?? "")
-          : undefined;
-      } while (marker);
+          marker = listed.IsTruncated
+            ? String(listed.NextPartNumberMarker ?? "")
+            : undefined;
+        } while (marker);
+      } catch (error) {
+        if (await objectExists(client, bucket, session.object_key)) {
+          const finalized = await finalizeMetadata();
+          return json({
+            session_id: session.id,
+            file_id: session.file_id,
+            provider: sessionProvider,
+            part_size_bytes: session.part_size_bytes,
+            total_parts: totalParts,
+            status: "completed",
+            parts: [],
+            file: finalized.file,
+          });
+        }
+        throw error;
+      }
 
       return json({
         session_id: session.id,
         file_id: session.file_id,
+        provider: sessionProvider,
         part_size_bytes: session.part_size_bytes,
         total_parts: totalParts,
         status: session.status,
@@ -321,7 +484,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (action === "abort") {
-      if (session.status !== "completed" && session.status !== "aborted") {
+      try {
         await client.send(
           new AbortMultipartUploadCommand({
             Bucket: bucket,
@@ -329,6 +492,14 @@ Deno.serve(async (req: Request) => {
             UploadId: session.provider_upload_id,
           }),
         );
+      } catch (error) {
+        if (await objectExists(client, bucket, session.object_key)) {
+          return json(
+            { error: "Upload already completed at the object provider and cannot be aborted." },
+            409,
+          );
+        }
+        throw error;
       }
 
       await supabase
@@ -336,119 +507,36 @@ Deno.serve(async (req: Request) => {
         .update({ status: "aborted", updated_at: new Date().toISOString() })
         .eq("id", session.id);
 
-      return json({ ok: true });
+      return json({ ok: true, status: "aborted" });
     }
 
     if (action === "complete") {
-      const parts: Array<Record<string, unknown>> = Array.isArray(body.parts)
-        ? body.parts
-        : [];
-      if (parts.length !== totalParts) {
-        return json({ error: "Every uploaded part must be supplied before completion." }, 400);
+      let completedParts;
+      try {
+        completedParts = normalizeParts(body.parts, totalParts);
+      } catch (error) {
+        return json(
+          { error: error instanceof Error ? error.message : "Invalid multipart data." },
+          400,
+        );
       }
 
-      const completedParts: Array<{ PartNumber: number; ETag: string }> = parts
-        .map((part) => ({
-          PartNumber: Number(part.part_number),
-          ETag: String(part.etag ?? ""),
-        }))
-        .sort((a, b) => a.PartNumber - b.PartNumber);
-
-      await client.send(
-        new CompleteMultipartUploadCommand({
-          Bucket: bucket,
-          Key: session.object_key,
-          UploadId: session.provider_upload_id,
-          MultipartUpload: { Parts: completedParts },
-        }),
-      );
-
-      const shouldIndex =
-        Boolean(settings.ai_enabled) &&
-        Number(session.size_bytes) <= Number(settings.max_indexable_text_bytes) &&
-        textLike(session.file_name, session.mime_type);
-
-      let file;
-
-      if (session.replaces_file_id) {
-        if (settings.versioning_enabled) {
-          const { error: versionError } = await supabase.from("file_versions").insert({
-            file_id: session.file_id,
-            owner_id: authData.user.id,
-            version_number: session.version_number,
-            storage_path: session.object_key,
-            storage_provider: sessionProvider,
-            mime_type: session.mime_type,
-            size_bytes: session.size_bytes,
-            sha256: null,
-          });
-          if (versionError) throw versionError;
-        }
-
-        const { data: updated, error: updateError } = await supabase
-          .from("vault_files")
-          .update({
-            name: session.file_name,
-            storage_path: session.object_key,
-            storage_provider: sessionProvider,
-            mime_type: session.mime_type,
-            size_bytes: session.size_bytes,
-            sha256: null,
-            current_version: session.version_number,
-            status: shouldIndex ? "uploaded" : "ready",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", session.file_id)
-          .select("*")
-          .single();
-
-        if (updateError) throw updateError;
-        file = updated;
-      } else {
-        const { data: created, error: fileError } = await supabase
-          .from("vault_files")
-          .insert({
-            id: session.file_id,
-            owner_id: authData.user.id,
-            folder_id: session.folder_id,
-            name: session.file_name,
-            storage_path: session.object_key,
-            storage_provider: sessionProvider,
-            mime_type: session.mime_type,
-            size_bytes: session.size_bytes,
-            sha256: null,
-            current_version: 1,
-            status: shouldIndex ? "uploaded" : "ready",
-          })
-          .select("*")
-          .single();
-
-        if (fileError) throw fileError;
-        file = created;
-
-        if (settings.versioning_enabled) {
-          const { error: versionError } = await supabase.from("file_versions").insert({
-            file_id: session.file_id,
-            owner_id: authData.user.id,
-            version_number: 1,
-            storage_path: session.object_key,
-            storage_provider: sessionProvider,
-            mime_type: session.mime_type,
-            size_bytes: session.size_bytes,
-            sha256: null,
-          });
-          if (versionError) throw versionError;
+      try {
+        await client.send(
+          new CompleteMultipartUploadCommand({
+            Bucket: bucket,
+            Key: session.object_key,
+            UploadId: session.provider_upload_id,
+            MultipartUpload: { Parts: completedParts },
+          }),
+        );
+      } catch (error) {
+        if (!(await objectExists(client, bucket, session.object_key))) {
+          throw error;
         }
       }
 
-      await supabase
-        .from("multipart_uploads")
-        .update({
-          status: "completed",
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", session.id);
+      const finalized = await finalizeMetadata();
 
       if (settings.observability_enabled) {
         console.log(
@@ -464,12 +552,18 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      return json({ file, should_index: shouldIndex });
+      return json({
+        file: finalized.file,
+        should_index: finalized.shouldIndex,
+        recovered: session.status !== "completed",
+      });
     }
 
     return json({ error: "Unsupported multipart action." }, 400);
   } catch (error) {
     console.error("multipart-upload failed", error);
-    return json({ error: error instanceof Error ? error.message : "Multipart upload failed." }, 500);
+    return json({
+      error: error instanceof Error ? error.message : "Multipart upload failed.",
+    }, 500);
   }
 });
