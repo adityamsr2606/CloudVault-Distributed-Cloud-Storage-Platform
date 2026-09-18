@@ -1,0 +1,20 @@
+FROM python:3.12-slim AS worker
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN addgroup --system cloudvault && adduser --system --ingroup cloudvault cloudvault
+
+COPY requirements.txt requirements-worker.txt ./
+RUN pip install --upgrade pip && pip install -r requirements-worker.txt
+
+COPY app ./app
+COPY migrations ./migrations
+COPY alembic.ini .
+
+USER cloudvault
+
+CMD ["celery", "-A", "app.workers.celery_app.celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]

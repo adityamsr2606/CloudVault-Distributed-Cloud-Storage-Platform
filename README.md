@@ -1,296 +1,370 @@
-#  CloudVault
+# CloudVault
 
-> **A Production-Grade Distributed Cloud Storage Platform Inspired by Modern SaaS Architecture**
+> Distributed cloud storage with secure object persistence, asynchronous processing, and tenant-scoped semantic retrieval.
 
-CloudVault is a cloud-native, distributed file storage platform designed with scalability, reliability, and security at its core. Built using a modern microservices-inspired architecture, the platform enables secure file management, asynchronous processing, intelligent caching, comprehensive monitoring, and seamless cloud deployment.
+CloudVault is a full-stack storage platform built to explore the engineering problems behind modern cloud-drive products: durable object storage, metadata consistency, authentication, background work, search, observability, containerized deployment, and AI-assisted retrieval.
 
-The project demonstrates software engineering best practices including clean architecture, RESTful API design, containerization, CI/CD, observability, automated testing, and production-ready deployment.
+The repository is being implemented incrementally. The sections below distinguish what exists in code today from the broader roadmap so the project does not claim features that have not been built or measured.
 
----
+## Free production deployment
 
-##  Features
+CloudVault has two intentional runtime profiles.
 
-### Authentication & Authorization
+### Public deployment — $0 subscription target
 
-* JWT Authentication
-* Refresh Tokens
-* Google OAuth 2.0
-* Role-Based Access Control (RBAC)
-* Secure Password Hashing
-* Email Verification
-* Password Reset
+The public web application is designed to stay within free managed tiers:
 
-### File Management
-
-* Secure File Upload & Download
-* Multipart Uploads
-* File Versioning
-* Folder Hierarchy
-* File Sharing
-* Public & Private Links
-* Storage Quotas
-* Soft Delete & Restore
-* File Metadata Management
-
-### Search & Analytics
-
-* Global File Search
-* Advanced Filters
-* User Activity Logs
-* Storage Analytics
-* Download Statistics
-* Dashboard Insights
-
-### Performance & Scalability
-
-* Redis Caching
-* Asynchronous Background Processing
-* Queue-Based Task Execution
-* Horizontal Scalability
-* Optimized Database Queries
-* API Rate Limiting
-
-### Monitoring & Observability
-
-* Prometheus Metrics
-* Grafana Dashboards
-* Structured Logging
-* Health Checks
-* Centralized Monitoring
-
-### Security
-
-* JWT Authentication
-* OAuth 2.0
-* HTTPS
-* Secure File Access
-* Input Validation
-* SQL Injection Protection
-* XSS Protection
-* CSRF Protection
-* Secure API Design
-
----
-
-##  System Architecture
-
-```
-                    React + TypeScript
-
-                           │
-                    API Gateway (FastAPI)
-
-      ┌───────────────┬───────────────┬───────────────┐
-      │               │               │
- Authentication   Storage Service   Search Service
-      │               │               │
- PostgreSQL       MinIO Storage   Elasticsearch
-      │
- Redis Cache
-      │
- Celery Workers
-      │
- RabbitMQ
-      │
- Prometheus
-      │
- Grafana
+```text
+Vercel Hobby
+    |
+React + TypeScript + Vite
+    |
+Supabase Free
+    |-- Auth
+    |-- Postgres + RLS
+    |-- Storage
+    |-- pgvector
+    |-- Edge Functions
+    +-- built-in gte-small embeddings
 ```
 
----
+This production profile avoids paid AI APIs and paid vector databases. Semantic retrieval uses Supabase's built-in `gte-small` model and `pgvector`. File objects stay in a private Storage bucket and are served through short-lived signed URLs.
 
-##  Tech Stack
+The application intentionally does not require OpenAI, Pinecone, Elasticsearch Cloud, a paid queue, or another subscription to remain functional. If a free-tier quota is exhausted, the expected behavior is service degradation or suspension rather than automatically creating a paid bill.
 
-### Backend
+### Local distributed-systems profile
 
-* Python
-* FastAPI
-* SQLAlchemy
-* Alembic
-* Pydantic
+The Docker Compose stack remains in the repository because it demonstrates a deeper SDE/system-design architecture:
 
-### Frontend
+- FastAPI API layer
+- PostgreSQL metadata
+- MinIO object storage
+- RabbitMQ + Celery background processing
+- Redis task results
+- Elasticsearch hybrid search
+- Prometheus + Grafana observability
 
-* React
-* TypeScript
-* Tailwind CSS
-* Framer Motion
+The two profiles solve different problems: the public profile optimizes for a genuinely free live demo; the local profile demonstrates distributed-system boundaries and operational engineering.
 
-### Database
+### Production product surface
 
-* PostgreSQL
+The public web application now includes:
 
-### Caching
+- Overview dashboard
+- My Vault file browser
+- folders
+- starred files
+- semantic Intelligence search
+- secure expiring share links
+- activity audit trail
+- trash and restore
+- settings/system status
+- responsive mobile navigation
+- animated live background with reduced-motion support
+- contextual hover actions for common file operations
 
-* Redis
+## Current implementation
 
-### Background Processing
+### Identity and access
 
-* Celery
-* RabbitMQ
+- Email/password registration and login
+- Argon2 password hashing
+- JWT access and refresh tokens
+- Authenticated API dependencies
+- User roles represented in the data model
+- Per-user storage quotas
 
-### Object Storage
+### File storage
 
-* MinIO (S3 Compatible)
+- Authenticated file upload and download
+- MinIO-backed S3-compatible object storage
+- PostgreSQL file metadata
+- SHA-256 content fingerprints
+- Upload-size validation
+- Storage quota enforcement
+- Immutable file-version records
+- File replacement with version history
+- Soft deletion and restore
+- Storage summary endpoint
+- Compensating object deletion when metadata persistence fails
 
-### Infrastructure
+### AI retrieval
 
-* Docker
-* Docker Compose
-* Nginx
-* AWS
+- Sentence Transformer embeddings
+- Text, PDF, and DOCX extraction
+- Overlapping document chunking
+- Batch embedding generation
+- Elasticsearch dense-vector indexing
+- Hybrid lexical + vector retrieval
+- Per-user authorization filters inside retrieval
+- File-level result deduplication
+- Asynchronous indexing through Celery and RabbitMQ
+- Embedding-model metadata stored with indexed chunks
 
-### Monitoring
+The AI subsystem is intentionally retrieval-focused. It is not a generic chatbot. Files are transformed into searchable semantic representations so users can find relevant documents by meaning while authorization remains enforced at search time.
 
-* Prometheus
-* Grafana
+### Platform engineering
 
-### Testing
+- FastAPI backend
+- SQLAlchemy data model
+- Alembic migrations
+- React + TypeScript frontend
+- Tailwind CSS
+- Nginx frontend container
+- PostgreSQL
+- Redis
+- RabbitMQ
+- MinIO
+- Elasticsearch
+- Prometheus
+- Grafana
+- Docker Compose
+- GitHub Actions CI definition
+- Pytest and Ruff quality configuration
 
-* Pytest
-* HTTPX
-* Locust
+## Architecture
 
-### DevOps
+```text
+                           Browser
+                              |
+                      React + TypeScript
+                              |
+                            Nginx
+                              |
+                           FastAPI
+                _____________|_____________
+               |             |             |
+          PostgreSQL       MinIO       Elasticsearch
+          metadata        objects      hybrid search
+               |             ^             ^
+               |             |             |
+               +------ RabbitMQ -----------+
+                         |
+                    Celery worker
+                         |
+              extraction -> chunking
+                         |
+                 sentence embeddings
 
-* GitHub Actions
-* CI/CD
-* Docker Registry
+                    Redis task backend
 
----
-
-##  Project Structure
-
+             Prometheus -> Grafana
 ```
+
+### Upload path
+
+```text
+Client
+  -> FastAPI validates authentication, size, and quota
+  -> object written to MinIO
+  -> metadata committed to PostgreSQL
+  -> indexing task published
+  -> request returns
+
+Celery worker
+  -> downloads object
+  -> extracts supported document text
+  -> chunks content
+  -> generates embeddings in batches
+  -> replaces file chunks in Elasticsearch
+  -> marks file search-ready
+```
+
+AI work is kept outside the synchronous upload request so model latency does not make storage availability depend on embedding generation.
+
+### Search path
+
+```text
+query
+  -> query embedding
+  -> lexical match + vector kNN
+  -> owner_id filter applied to both retrieval paths
+  -> rank candidates
+  -> keep highest-scoring chunk for each file
+  -> return file results
+```
+
+## Repository structure
+
+```text
 CloudVault/
-
 ├── backend/
 │   ├── app/
-│   ├── api/
-│   ├── core/
-│   ├── database/
-│   ├── services/
-│   ├── models/
-│   ├── workers/
+│   │   ├── api/
+│   │   ├── core/
+│   │   ├── database/
+│   │   ├── services/
+│   │   └── workers/
+│   ├── migrations/
 │   └── tests/
-│
 ├── frontend/
-│   ├── src/
-│   ├── components/
-│   ├── pages/
-│   ├── hooks/
-│   └── assets/
-│
+│   └── src/
 ├── infrastructure/
-│   ├── docker/
-│   ├── nginx/
-│   ├── monitoring/
-│   └── kubernetes/
-│
-├── docs/
-├── scripts/
+│   └── monitoring/
+├── supabase/
+│   ├── functions/
+│   └── migrations/
 ├── .github/
+│   └── workflows/
+├── docker-compose.yml
+├── vercel.json
+├── .env.example
 └── README.md
 ```
 
----
+The structure is deliberately compact. New folders are added only when the implementation needs them.
 
-##  Highlights
+## Local development
 
-* Production-ready REST API
-* Clean Architecture
-* Modular Design
-* Fully Containerized
-* Cloud-Native Deployment
-* Scalable Background Workers
-* Enterprise Authentication
-* Advanced Monitoring
-* Secure File Storage
-* Professional SaaS UI
+### Requirements
 
----
+- Docker Desktop with Docker Compose
+- Enough memory for Elasticsearch and the embedding worker
 
-##  Planned Performance Goals
+### Start the platform
 
-* Support 1M+ simulated file operations
-* 20+ REST API endpoints
-* Sub-200 ms response time for cached requests
-* Horizontal service scalability
-* Comprehensive automated test coverage
+```bash
+cp .env.example .env
+docker compose up --build
+```
 
----
+On Windows PowerShell:
 
-##  Testing
+```powershell
+Copy-Item .env.example .env
+docker compose up --build
+```
 
-* Unit Testing
-* Integration Testing
-* API Testing
-* Load Testing
-* Performance Benchmarking
+Default local services:
 
----
+| Service | Address |
+| --- | --- |
+| Web app | http://localhost:8080 |
+| FastAPI | http://localhost:8000 |
+| API docs | http://localhost:8000/docs |
+| RabbitMQ management | http://localhost:15672 |
+| MinIO console | http://localhost:9001 |
+| Prometheus | http://localhost:9090 |
+| Grafana | http://localhost:3000 |
 
-##  Security
+Change the example secrets before using the stack outside an isolated local environment.
 
-* JWT Authentication
-* OAuth 2.0
-* Role-Based Access Control
-* Password Hashing
-* Input Validation
-* Rate Limiting
-* Secure Headers
-* HTTPS Support
+## API surface implemented
 
----
+```text
+GET    /health
+POST   /api/v1/auth/register
+POST   /api/v1/auth/login
+POST   /api/v1/auth/refresh
+GET    /api/v1/files
+GET    /api/v1/files/summary
+POST   /api/v1/files
+PUT    /api/v1/files/{file_id}
+GET    /api/v1/files/{file_id}/versions
+GET    /api/v1/files/{file_id}/download
+DELETE /api/v1/files/{file_id}
+POST   /api/v1/files/{file_id}/restore
+GET    /api/v1/search?q=...
+GET    /metrics
+```
 
-##  Deployment
+## Quality gates
 
-The application is designed for production deployment using Docker and cloud infrastructure with support for:
+The repository contains checks for:
 
-* AWS EC2
-* AWS S3 / MinIO
-* PostgreSQL
-* Redis
-* RabbitMQ
-* Nginx Reverse Proxy
-* GitHub Actions CI/CD
+- Python linting and formatting with Ruff
+- Backend unit/API tests with Pytest
+- Backend coverage reporting
+- Frontend TypeScript build
+- Backend and frontend container builds
+- Database migrations instead of implicit schema creation
 
----
+GitHub Actions runs backend lint/format/tests/container checks and frontend typecheck/build/container checks. The repository does not invent a passing build or coverage percentage; workflow results are treated as the source of truth.
 
-##  Documentation
+## Observability
 
-The repository includes:
+CloudVault exposes Prometheus metrics including:
 
-* Software Requirements Specification (SRS)
-* High-Level Design (HLD)
-* Low-Level Design (LLD)
-* API Documentation
-* Database ER Diagram
-* Architecture Diagrams
-* Deployment Guide
-* User Guide
+- `cloudvault_file_uploads_total`
+- `cloudvault_file_upload_bytes_total`
+- `cloudvault_semantic_search_requests_total`
+- `cloudvault_semantic_search_duration_seconds`
+- `cloudvault_ai_index_jobs_total`
+- `cloudvault_ai_index_failures_total`
+- `cloudvault_ai_index_duration_seconds`
 
----
+These allow AI indexing to be operated like a real production subsystem instead of an invisible model call.
 
-##  Learning Objectives
+## Security decisions already enforced
 
-This project demonstrates practical experience in:
+- Passwords are hashed rather than encrypted or stored in plaintext.
+- File APIs always scope records to the authenticated owner.
+- Elasticsearch retrieval carries the same owner boundary as relational lookups.
+- File names are normalized before generating object keys.
+- Upload limits and quotas are checked server-side.
+- The frontend never receives MinIO credentials.
+- Secrets are represented through environment variables and excluded from Git.
 
-* Backend Development
-* Distributed Systems
-* REST API Design
-* Database Design
-* Cloud Computing
-* System Design
-* Asynchronous Programming
-* Containerization
-* DevOps
-* Software Architecture
+A future security milestone will add refresh-token revocation/rotation, rate limiting, email verification, OAuth, signed sharing links, stricter content validation, and deployment-specific TLS/security headers.
 
----
+## AI evaluation plan
 
-##  Author
+Semantic retrieval will not be advertised with invented accuracy numbers. Before benchmark claims are added, the project will use a labelled query-to-document relevance set and measure metrics such as:
+
+- Recall@K
+- Precision@K
+- Mean Reciprocal Rank
+- nDCG
+- p50/p95 search latency
+- indexing throughput
+- indexing failure rate
+
+## Roadmap
+
+The original product specification is broader than the first working milestone. Still to be implemented:
+
+- Google OAuth 2.0
+- email verification and password reset
+- persisted refresh-token rotation/revocation
+- explicit admin RBAC endpoints
+- folders
+- permanent purge workflow and retention policy
+- private/public sharing links
+- multipart uploads for very large objects
+- Redis response caching and rate limiting
+- activity/audit log
+- storage/download analytics
+- near-duplicate suggestions
+- related-file recommendations
+- retrieval evaluation harness
+- load tests and measured performance targets
+- Grafana dashboard provisioning
+- hardened production deployment and TLS
+- Kubernetes manifests only if the deployment actually needs Kubernetes
+
+## Reference documentation
+
+Implementation choices are grounded primarily in official project documentation:
+
+- FastAPI: https://fastapi.tiangolo.com/
+- SQLAlchemy: https://docs.sqlalchemy.org/
+- Alembic: https://alembic.sqlalchemy.org/
+- Elasticsearch vector search: https://www.elastic.co/docs/solutions/search/vector
+- Sentence Transformers: https://www.sbert.net/
+- Celery: https://docs.celeryq.dev/
+- MinIO Python SDK: https://min.io/docs/minio/linux/developers/python/minio-py.html
+- Prometheus: https://prometheus.io/docs/
+- OWASP ASVS: https://owasp.org/www-project-application-security-verification-standard/
+
+## Author
 
 **Aditya Mohan Srivastava**
 
-Aspiring Software Development Engineer focused on building scalable, cloud-native backend systems with modern software engineering practices.
+
+## Design direction
+
+CloudVault does not copy another product's visual identity. The interface uses current product-design patterns as references: calm hierarchy and consistent navigation, search-first content access, contextual hover actions, desktop-like responsiveness, and motion that supports orientation rather than decoration.
+
+## Cost policy
+
+The hosted project is intentionally built around free/open-source technologies. No recurring paid subscription is required by the architecture itself. Free-tier providers can change quotas or product terms over time, so the live deployment should be periodically reviewed against current limits before relying on it for production workloads.
