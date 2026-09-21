@@ -16,7 +16,7 @@
 ![Backblaze B2](https://img.shields.io/badge/Backblaze%20B2-S3%20Compatible-E21E29)
 ![Vercel](https://img.shields.io/badge/Deployment-Vercel-000000?logo=vercel&logoColor=white)
 
-**[Live Application](https://cloudvault-distributed-cloud-storag-srivastavaadityamohan0-6847.vercel.app)**
+**[Live Application](cloudvault-distributed-cloud-storag.vercel.app)**
 
 **[Production Validation](docs/PRODUCTION_VALIDATION.md)** · **[Backblaze B2 Setup](docs/B2_SETUP.md)**
 
