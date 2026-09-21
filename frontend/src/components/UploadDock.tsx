@@ -1,4 +1,5 @@
 import { Pause, Play, X } from "lucide-react";
+import { useEffect } from "react";
 
 import type { CloudUploadTask, UploadProgress } from "../lib/uploads";
 
@@ -14,14 +15,24 @@ export default function UploadDock({
   fileName,
   progress,
   task,
+  onDismiss,
 }: {
   fileName: string;
   progress: UploadProgress;
   task: CloudUploadTask;
+  onDismiss?: () => void;
 }) {
   const active = progress.state === "uploading" || progress.state === "paused";
   const complete = progress.state === "completed";
+  const cancelled = progress.state === "cancelled";
   const failed = progress.state === "failed";
+
+  useEffect(() => {
+    if ((!complete && !cancelled) || !onDismiss) return;
+
+    const timer = window.setTimeout(onDismiss, 2500);
+    return () => window.clearTimeout(timer);
+  }, [complete, cancelled, onDismiss]);
 
   return (
     <aside
@@ -42,7 +53,7 @@ export default function UploadDock({
           </span>
         </div>
 
-        {active && (
+        {(active || complete || cancelled || failed) && (
           <div className="upload-dock-actions">
             {progress.state === "paused" ? (
               <button aria-label="Resume upload" onClick={() => task.resume()}>
@@ -53,9 +64,15 @@ export default function UploadDock({
                 <Pause size={14} />
               </button>
             )}
-            <button aria-label="Cancel upload" onClick={() => void task.cancel()}>
-              <X size={14} />
-            </button>
+            {active ? (
+              <button aria-label="Cancel upload" onClick={() => void task.cancel()}>
+                <X size={14} />
+              </button>
+            ) : (
+              <button aria-label="Dismiss upload notification" onClick={onDismiss}>
+                <X size={14} />
+              </button>
+            )}
           </div>
         )}
       </div>
