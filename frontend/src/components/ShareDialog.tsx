@@ -1,5 +1,6 @@
 import { Link2, X } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { getProductSettings, type ProductSettings } from "../config/product";
 import { VaultFile, createShareLink } from "../lib/cloudvault";
@@ -48,7 +49,7 @@ export default function ShareDialog({
     }
   }
 
-  return (
+  return createPortal(
     <div className="dialog-overlay" role="dialog" aria-modal="true" aria-label={`Share ${file.name}`}>
       <button className="dialog-scrim" onClick={onClose} aria-label="Close sharing dialog" />
       <form className="share-dialog" onSubmit={submit}>
@@ -114,6 +115,7 @@ export default function ShareDialog({
           </>
         )}
       </form>
-    </div>
+    </div>,
+    document.body,
   );
 }
