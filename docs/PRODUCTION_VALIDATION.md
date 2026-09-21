@@ -212,3 +212,25 @@ and WebKit using representative 320, 360, 390, 430, 768, 820 and 1024 px viewpor
 
 These are build-artifact measurements and browser smoke-test results, not network or
 real-user performance measurements.
+
+
+## Large-upload production validation update — 2026-09-21
+
+The hosted Backblaze B2 multipart path has now passed a real browser upload above the
+Supabase direct-upload threshold:
+
+- 64 MiB file uploaded successfully through the authenticated CloudVault multipart flow
+- provider: Backblaze B2
+- multipart part size: 16 MiB
+- total uploaded parts: 4
+- browser-to-B2 CORS was verified with `PUT`, `GET`, `HEAD`, wildcard Vercel origins,
+  and exposed `ETag`
+- B2 request-signing failures caused by whitespace in stored provider configuration were
+  fixed by normalizing environment values before signing
+
+This verifies that the >50 MB production path is operational. The configured 1.5 GiB
+maximum remains a product policy until a real full-size 1.5 GiB browser upload is completed.
+
+Git-based Vercel production deployment was reconnected on 2026-09-21 so future pushes to
+`main` can trigger a fresh production build instead of relying on older immutable manual
+deployment URLs.
