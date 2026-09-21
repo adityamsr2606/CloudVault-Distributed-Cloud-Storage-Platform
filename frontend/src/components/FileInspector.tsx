@@ -189,7 +189,16 @@ export default function FileInspector({
       </aside>
 
       {uploadTask && uploadProgress && (
-        <UploadDock fileName={uploadName} progress={uploadProgress} task={uploadTask} />
+        <UploadDock
+          fileName={uploadName}
+          progress={uploadProgress}
+          task={uploadTask}
+          onDismiss={() => {
+            setUploadTask(null);
+            setUploadProgress(null);
+            setUploadName("");
+          }}
+        />
       )}
     </div>
   );
