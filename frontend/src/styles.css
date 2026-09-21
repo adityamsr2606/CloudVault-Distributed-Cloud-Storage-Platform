@@ -2451,11 +2451,18 @@ button.file-glyph {
   backdrop-filter: blur(6px);
 }
 
+.dialog-overlay {
+  overflow-y: auto;
+  padding: min(8vh, 72px) 14px 24px;
+}
+
 .share-dialog {
   position: relative;
   z-index: 1;
   width: min(440px, calc(100vw - 28px));
-  margin: min(14vh, 120px) auto 0;
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  margin: 0 auto;
   display: grid;
   gap: 15px;
   padding: 24px;
@@ -3490,7 +3497,7 @@ textarea {
     width: calc(100vw - 20px);
     max-height: calc(100dvh - 24px);
     overflow-y: auto;
-    margin: max(10px, env(safe-area-inset-top)) auto 0;
+    margin: 0 auto;
     padding: 18px;
     border-radius: 16px;
   }
