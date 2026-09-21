@@ -46,13 +46,18 @@ export default function FileInspector({
   const picker = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    void Promise.all([listFileVersions(file.id), relatedFiles(file.id)])
-      .then(([nextVersions, nextRelated]) => {
-        setVersions(nextVersions);
-        setRelated(nextRelated);
-      })
+    void listFileVersions(file.id)
+      .then(setVersions)
       .catch((error) => {
-        onMessage(error instanceof Error ? error.message : "Could not load file intelligence");
+        onMessage(error instanceof Error ? error.message : "Could not load version history");
+      });
+
+    void relatedFiles(file.id)
+      .then(setRelated)
+      .catch(() => {
+        // Related-file suggestions are optional. A retrieval failure should not
+        // block file details, sharing, downloads, or version history.
+        setRelated([]);
       });
   }, [file.id, onMessage]);
 

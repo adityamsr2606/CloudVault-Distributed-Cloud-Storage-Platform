@@ -78,6 +78,20 @@ export default function VaultPage({ starredOnly = false }: { starredOnly?: boole
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    if (uploadProgress?.state !== "completed" && uploadProgress?.state !== "cancelled") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setUploadTask(null);
+      setUploadProgress(null);
+      setUploadName("");
+    }, 2500);
+
+    return () => window.clearTimeout(timer);
+  }, [uploadProgress?.state]);
+
   useRealtimeRefresh(["vault_files", "vault_folders", "product_settings"], refresh);
 
   const activeFolderRecord = folders.find((folder) => folder.id === activeFolder) ?? null;

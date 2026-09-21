@@ -53,9 +53,22 @@ export default function FileActions({
         <button aria-label={file.is_starred ? "Unstar file" : "Star file"} onClick={star}>
           <Star size={15} fill={file.is_starred ? "currentColor" : "none"} />
         </button>
-        <button aria-label="Download file" onClick={download}><Download size={15} /></button>
-        <button aria-label="Create share link" onClick={() => setSharing(true)}><Share2 size={15} /></button>
-        <button aria-label="Move to trash" onClick={remove}><Trash2 size={15} /></button>
+        <button aria-label="Download file" onClick={download}>
+          <Download size={15} />
+        </button>
+        <button
+          aria-label="Create share link"
+          onClick={(event) => {
+            event.stopPropagation();
+            onMessage("");
+            setSharing(true);
+          }}
+        >
+          <Share2 size={15} />
+        </button>
+        <button aria-label="Move to trash" onClick={remove}>
+          <Trash2 size={15} />
+        </button>
       </div>
 
       {sharing && (
