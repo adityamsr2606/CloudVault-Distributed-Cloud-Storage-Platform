@@ -24,11 +24,11 @@ function chunk<T>(items: T[], size: number) {
 
 function objectStore(provider: string) {
   if (provider === "b2") {
-    const endpoint = Deno.env.get("B2_S3_ENDPOINT");
-    const region = Deno.env.get("B2_REGION");
-    const accessKeyId = Deno.env.get("B2_APPLICATION_KEY_ID");
-    const secretAccessKey = Deno.env.get("B2_APPLICATION_KEY");
-    const bucket = Deno.env.get("B2_BUCKET");
+    const endpoint = Deno.env.get("B2_S3_ENDPOINT")?.trim();
+    const region = Deno.env.get("B2_REGION")?.trim();
+    const accessKeyId = Deno.env.get("B2_APPLICATION_KEY_ID")?.trim();
+    const secretAccessKey = Deno.env.get("B2_APPLICATION_KEY")?.trim();
+    const bucket = Deno.env.get("B2_BUCKET")?.trim();
 
     if (!endpoint || !region || !accessKeyId || !secretAccessKey || !bucket) {
       throw new Error("Backblaze B2 is not configured on this deployment.");
@@ -46,10 +46,10 @@ function objectStore(provider: string) {
   }
 
   if (provider === "r2") {
-    const accountId = Deno.env.get("R2_ACCOUNT_ID");
-    const accessKeyId = Deno.env.get("R2_ACCESS_KEY_ID");
-    const secretAccessKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
-    const bucket = Deno.env.get("R2_BUCKET");
+    const accountId = Deno.env.get("R2_ACCOUNT_ID")?.trim();
+    const accessKeyId = Deno.env.get("R2_ACCESS_KEY_ID")?.trim();
+    const secretAccessKey = Deno.env.get("R2_SECRET_ACCESS_KEY")?.trim();
+    const bucket = Deno.env.get("R2_BUCKET")?.trim();
 
     if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
       throw new Error("Cloudflare R2 is not configured on this deployment.");
